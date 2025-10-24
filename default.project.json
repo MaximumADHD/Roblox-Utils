@@ -28,6 +28,10 @@
                 }
             },
 
+            "Test": {
+                "$path": "Test"
+            },
+
             "Packages": {
                 "$path": "Packages"
             }
