@@ -23,7 +23,6 @@ export type Config = {
 
 export type Class<T = any> = typeof(setmetatable({} :: {
     Default: T,
-    DataStore: DataStore,
 
     _dataCache: {
         [number]: any,
@@ -38,6 +37,9 @@ export type Class<T = any> = typeof(setmetatable({} :: {
 
     _netInit: Network.Class<LazyTable>,
     _netPatch: Network.Class<LazyTable>,
+
+    _dataStoreService: DataStoreService?,
+    _dataStoreName: string,
 }, EasyStore))
 
 type Trove = Trove.Trove
@@ -127,7 +129,7 @@ function PlayerData.Save<T>(self: PlayerData<T>): Promise
             end
         end
         
-        local dataStore = self.Server.DataStore
+        local dataStore = self.Server:GetDataStore()
         local key = getProfileKey(assert(owner).UserId)
         
         dataStore:UpdateAsync(key, function (oldData)
@@ -180,7 +182,7 @@ function EasyStore.Get<T>(self: Class<T>, userId: number?): PlayerData<T>
 
             task.spawn(function ()
                 local RETRY_COUNT = 5
-                local store = self.DataStore
+                local store = self:GetDataStore()
 
                 for retry = 1, RETRY_COUNT do
                     local success, currentData = xpcall(function ()
@@ -194,7 +196,7 @@ function EasyStore.Get<T>(self: Class<T>, userId: number?): PlayerData<T>
                             currentData = DeltaTable.DeepCopy(default)
                         end
 
-                        if currentData.RobloxMetaData ~= nil then
+                        if currentData.RobloxMetaData ~= nil and not rawget(default :: any, "RobloxMetaData") then
                             -- ProfileService holdover, use the Data key.
                             currentData = currentData.Data
                         end
@@ -432,6 +434,15 @@ function PlayerData.Release(self: PlayerData, force: boolean?): boolean
     return true
 end
 
+function EasyStore.GetDataStore(self: Class): DataStore
+    if RunContext.IsServer or RunContext.IsEdit then
+        local dataStoreService = assert(self._dataStoreService)
+        return dataStoreService:GetDataStore(self._dataStoreName)
+    end
+
+    error("DataStore is not available on the client!")
+end
+
 --- Starts the DataStore. Sets up player added/removed handlers on the server, and network event handlers on the client.
 --- Returns a `Trove` that can be used to clean up the DataStore if ever necessary.
 --- @return `Trove` A `Trove` that can be used to clean up the DataStore.
@@ -530,7 +541,6 @@ end
 --- @param config.AutoSaveInterval The interval, in seconds, at which to autosave player data. Defaults to 15 seconds.
 local function create<TEMPLATE>(storeName: string, default: TEMPLATE, config: Config?): Class<TEMPLATE>
     local dataStoreService = (config and config.MockDataStoreService) or DataStoreService
-    local dataStore = dataStoreService:GetDataStore(storeName)
 
     local netInit = Network.Event(`DataStore_{storeName}_DataInit`, function (data: unknown): LazyTable
         assert(type(data) == "table")
@@ -544,13 +554,15 @@ local function create<TEMPLATE>(storeName: string, default: TEMPLATE, config: Co
 
     local store = setmetatable({
         Default = default,
-        DataStore = dataStore,
 
         _dataCache = {},
         _viewCache = {},
 
         _netInit = netInit :: any,
         _netPatch = netPatch :: any,
+
+        _dataStoreName = storeName,
+        _dataStoreService = dataStoreService,
         _autoSaveInterval = (config and config.AutoSaveInterval) or 15,
     }, EasyStore)
 
