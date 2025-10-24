@@ -1,0 +1,8 @@
+[package]
+name = "maximumadhd/run-context"
+description = "RunContext - What context is your code running in?"
+version = "1.0.0"
+license = "MIT"
+authors = ["MaximumADHD"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"

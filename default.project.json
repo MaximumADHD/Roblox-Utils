@@ -1,0 +1,36 @@
+{
+    "name": "Roblox-Utilities",
+
+    "tree": {
+        "$className": "DataModel",
+
+        "ReplicatedStorage": {
+            "$className": "ReplicatedStorage",
+            "$ignoreUnknownInstances": true,
+
+            "Modules": {
+                "$path": "Modules",
+
+                "_Index": {
+                    "$path": "Packages/_Index"
+                },
+
+                "Signal": {
+                    "$path": "Packages/Signal.lua"
+                },
+
+                "PromiseBase": {
+                    "$path": "Packages/PromiseBase.lua"
+                },
+
+                "Trove": {
+                    "$path": "Packages/Trove.lua"
+                }
+            },
+
+            "Packages": {
+                "$path": "Packages"
+            }
+        }
+    }
+}

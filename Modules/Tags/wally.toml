@@ -1,0 +1,8 @@
+[package]
+name = "maximumadhd/tags"
+description = "Tags - A less verbose version of the CollectionService with support for binding to Troves and simple add/remove wrappers."
+version = "1.0.0"
+license = "MIT"
+authors = ["MaximumADHD"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
