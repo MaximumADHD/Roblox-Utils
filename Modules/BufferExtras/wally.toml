@@ -1,0 +1,8 @@
+[package]
+name = "maximumadhd/buffer-extras"
+description = "BufferExtras - Additional encoding/decoding functions for Luau buffers."
+version = "1.0.1"
+license = "MIT"
+authors = ["MaximumADHD"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
