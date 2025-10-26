@@ -613,6 +613,9 @@ export type Class<SaveData = any> = {
     --- Returns a `Trove` that can be used to clean up the DataStore if ever necessary.
     --- @return `Trove` A maid that can be used to clean up the DataStore.
     Start: (self: Class<SaveData>) -> Trove,
+
+    --- The default data structure used for new players.
+    Default: SaveData,
 }
 
 --- Main EasyStore module for managing player data with Roblox DataStores.
