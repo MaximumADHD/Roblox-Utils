@@ -8,7 +8,8 @@ export type Validator<T...> = (...unknown) -> T...
 
 export type EventOptions = {
     Name: string,
-    Reliable: boolean,
+    Reliable: boolean?,
+    Unreliable: boolean?,
 }
 
 return {

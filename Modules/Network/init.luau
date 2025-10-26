@@ -49,7 +49,12 @@ local function newEvent<T...>(id: string | EventOptions, validate: Validator<T..
         reliable = true
     else
         name = id.Name
-        reliable = id.Reliable
+
+        if id.Reliable ~= nil then
+            reliable = id.Reliable
+        elseif id.Unreliable ~= nil then
+            reliable = not id.Unreliable
+        end
     end
 
     local event: Class<T...> = setmetatable({
