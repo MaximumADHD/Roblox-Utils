@@ -17,7 +17,12 @@ pcall(function ()
     isEdit = RunService:IsEdit()
 end)
 
+export type Label = | "Edit" | "Server" | "Client"
+
 return table.freeze({
+    -- The identity of the current run context.
+    Identity = (if isEdit then "Edit" elseif isServer then "Server" else "Client") :: Label,
+
     --- Is this running on a dedicated Roblox server? (RCC = Roblox Cloud Compute)
     IsRCC = isRCC,
 
