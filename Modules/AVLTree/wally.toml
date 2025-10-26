@@ -1,0 +1,8 @@
+[package]
+name = "maximumadhd/avl-tree"
+description = "AVLTree - A balanced binary search tree implementation in Luau."
+version = "1.0.0"
+license = "MIT"
+authors = ["MaximumADHD"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
