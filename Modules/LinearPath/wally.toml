@@ -1,0 +1,8 @@
+[package]
+name = "maximumadhd/linear-path"
+description = "LinearPath - A traversable path of 3D points, traversed by distance along the entire path."
+version = "1.0.0"
+license = "MIT"
+authors = ["MaximumADHD"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
