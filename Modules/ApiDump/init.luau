@@ -2,7 +2,7 @@
 -- API Dump Types
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-type SecurityType =
+export type SecurityType =
     | "None"
     | "PluginSecurity"
     | "RobloxSecurity"
@@ -10,27 +10,27 @@ type SecurityType =
     | "RobloxScriptSecurity"
     | "NotAccessibleSecurity"
 
-type ThreadSafety =
+export type ThreadSafety =
     | "Safe"
     | "Unsafe"
     | "ReadSafe"
 
-type TypeCategory =
+export type TypeCategory =
     | "Enum"
     | "Class"
     | "Group"
     | "DataType"
     | "Primitive"
 
-type Named = {
+export type Named = {
     Name: string,
 }
 
-type TypeInfo = Named & {
+export type TypeInfo = Named & {
     Category: TypeCategory,
 }
 
-type Parameter = Named & {
+export type Parameter = Named & {
     Type: TypeInfo,
 }
 
@@ -38,7 +38,7 @@ type Descriptor = Named & {
     Tags: { string },
 }
 
-type ClassDescriptor = Descriptor & {
+export type ClassDescriptor = Descriptor & {
     Superclass: string,
     MemoryCategory: string,
     Members: {MemberDescriptor},
@@ -52,16 +52,16 @@ type ClassDescriptor = Descriptor & {
     }?
 }
 
-type IMemberDescriptor<T> = Descriptor & {
+export type IMemberDescriptor<T> = Descriptor & {
     MemberType: T,
     ThreadSafety: ThreadSafety,
 }
 
-type ISecurityCapabilities = { string } | {
+export type ISecurityCapabilities = { string } | {
     Read: { string },
 }
 
-type PropertyDescriptor = IMemberDescriptor<"Property"> & {
+export type PropertyDescriptor = IMemberDescriptor<"Property"> & {
     Category: string,
     ValueType: TypeInfo,
     Default: string,
@@ -79,39 +79,39 @@ type PropertyDescriptor = IMemberDescriptor<"Property"> & {
     },
 }
 
-type EventDescriptor = IMemberDescriptor<"Event"> & {
+export type EventDescriptor = IMemberDescriptor<"Event"> & {
     Parameters: { Parameter },
     Security: SecurityType,
 }
 
-type FunctionDescriptor = IMemberDescriptor<"Function"> & {
-    Parameters: { Parameter },
-    ReturnType: TypeInfo,
-    Security: SecurityType,
-}
-
-type CallbackDescriptor = IMemberDescriptor<"Callback"> & {
+export type FunctionDescriptor = IMemberDescriptor<"Function"> & {
     Parameters: { Parameter },
     ReturnType: TypeInfo,
     Security: SecurityType,
 }
 
-type MemberDescriptor = 
+export type CallbackDescriptor = IMemberDescriptor<"Callback"> & {
+    Parameters: { Parameter },
+    ReturnType: TypeInfo,
+    Security: SecurityType,
+}
+
+export type MemberDescriptor = 
     | EventDescriptor
     | PropertyDescriptor
     | FunctionDescriptor
     | CallbackDescriptor
 
-type EnumDescriptor = Descriptor & {
+export type EnumDescriptor = Descriptor & {
     Items: { EnumItemDescriptor },
 }
 
-type EnumItemDescriptor = Descriptor & {
+export type EnumItemDescriptor = Descriptor & {
     Value: number,
     LegacyNames: { string }?,
 }
 
-type TagMap = {
+export type TagMap = {
     NotCreatable: true?,
     NotReplicated: true?,
     ReadOnly: true?,
@@ -126,7 +126,7 @@ type TagMap = {
     WriteOnly: true?,
 }
 
-type ApiDump = {
+export type ApiDump = {
     Classes: { ClassDescriptor },
     Enums: { EnumDescriptor },
     __classMap: ClassMap?,
@@ -136,12 +136,14 @@ type ClassMap = {
     [string]: ClassDescriptor
 }
 
-export type ApiGet = {
-    Success: true,
+type IApiGet<Success, ApiDump> = {
+    Success: Success,
     ApiDump: ApiDump,
-} | {
-    Success: false
 }
+
+export type ApiGet = 
+    | IApiGet<true, ApiDump>
+    | IApiGet<false, nil>
 
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- Main

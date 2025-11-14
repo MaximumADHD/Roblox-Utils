@@ -23,6 +23,10 @@
                     "$path": "Packages/PromiseBase.lua"
                 },
 
+                "Squash": {
+                    "$path": "Packages/Squash.lua"
+                },
+
                 "Trove": {
                     "$path": "Packages/Trove.lua"
                 }
