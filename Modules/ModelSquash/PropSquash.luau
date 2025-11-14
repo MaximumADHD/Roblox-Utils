@@ -76,9 +76,9 @@ local SystemTypes = table.freeze({
     float = "Float32",
     double = "Float64",
     string = "String",
-	number = "Float64",
+    number = "Float64",
     boolean = "Bool",
-	bool = "Bool",
+    bool = "Bool",
 })
 
 Types = {
