@@ -139,7 +139,13 @@ local function serialize(root: Instance): buffer
                 continue
             end
 
-            local typeName = member.ValueType.Name
+            local valueType = member.ValueType
+            local category = valueType.Category
+            
+            local typeName = if category ~= "Enum"
+                then valueType.Name
+                else "EnumItem"
+            
             local typeIndex = PropSquash.TypeEnum[typeName]
 
             if typeIndex == nil then
@@ -213,7 +219,7 @@ local function serialize(root: Instance): buffer
                 Values = {},
             }
 
-            for i, objectId in class.ObjectIds do
+            for i, objectId in ipairs(class.ObjectIds) do
                 prop.Values[i] = map[objectId] or {}
             end
 

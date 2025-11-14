@@ -2,7 +2,7 @@
 -- https://github.com/rojo-rbx/rbx-dom/blob/master/rbx_dom_lua/src/EncodedValue.lua
 
 --!strict
-local Shared = game.ReplicatedStorage.Packages
+local Shared = script.Parent.Parent
 local Squash = require(Shared.Squash)
 
 type Cursor = Squash.Cursor
@@ -44,7 +44,7 @@ local TypeEnum = table.freeze({
     Font = 15,
     Int32 = 16,
     Int64 = 17,
-    MaterialColors = 18,
+    NumberSequence = 18,
     PhysicalProperties = 19,
     Ray = 20,
     Rect = 21,
@@ -54,7 +54,7 @@ local TypeEnum = table.freeze({
     UDim2 = 25,
     Tags = 26,
     Vector2 = 27,
-    Vector2int16 = 28,
+    NumberRange = 28,
     Vector3 = 29,
     Vector3int16 = 30,
     OptionalCFrame = 31,
@@ -218,6 +218,9 @@ Types = {
     Int32 = Squash.i32(),
     Int64 = Squash.i64(),
 
+    NumberSequence = Squash.NumberSequence(F32),
+    NumberRange = Squash.NumberRange(F32),
+
     OptionalCFrame = {
         des = function (cursor): CFrame?
             local isPresent = BOOL.des(cursor)
@@ -288,8 +291,6 @@ Types = {
     },
 
     Vector2 = Squash.Vector2(F32),
-    Vector2int16 = Squash.Vector2int16(),
-
     Vector3 = Squash.Vector3(F32),
     Vector3int16 = Squash.Vector3int16(),
 }

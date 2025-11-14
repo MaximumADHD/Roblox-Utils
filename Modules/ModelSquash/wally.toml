@@ -1,7 +1,7 @@
 [package]
 name = "maximumadhd/model-squash"
 description = "ModelSquash - A module for de/serializing instances from/into buffers via Squash."
-version = "0.1.0"
+version = "0.1.3"
 license = "MIT"
 authors = ["MaximumADHD"]
 registry = "https://github.com/UpliftGames/wally-index"
