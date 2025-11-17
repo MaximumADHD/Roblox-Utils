@@ -76,7 +76,7 @@ local function serialize(root: Instance): buffer
 
             return classMap[className]
         end)()
-        
+
         refMap[inst] = i
         inst:SetAttribute("__msref", i)
 
@@ -110,8 +110,6 @@ local function serialize(root: Instance): buffer
             if tags.ReadOnly or tags.Deprecated or tags.NotReplicated then
                 continue
             end
-
-            name = name:sub(1, 1):upper() .. name:sub(2)
 
             if member.Security.Write ~= "None" then
                 continue
@@ -215,9 +213,9 @@ local function serialize(root: Instance): buffer
     --------------------------
     -- 4: Instance Hierarchy
     --------------------------
-    
+
     local parentIds = {}
-    
+
     for i, inst in instances do
         local inst = instances[i]
         local parent = inst.Parent
@@ -277,7 +275,7 @@ local function serialize(root: Instance): buffer
     --------------------------
 
     -- 1b: Version
-    VLQ.ser(cursor, 2)
+    VLQ.ser(cursor, 1)
 
     -- 1a: Magic
     STRING.ser(cursor, "RBXMSQSH")
@@ -299,8 +297,8 @@ local function deserialize(buf: buffer): Instance
 
     local version = VLQ.des(cursor)
 
-    if version < 1 or version > 2 then
-        error("ModelSquash - Unsupported format version! (Expected 1 or 2)")
+    if version ~= 1 then
+        error("ModelSquash - Unsupported format version! (Expected 1)")
     end
 
     -- Deserialize classes
@@ -311,26 +309,7 @@ local function deserialize(buf: buffer): Instance
     for i = 1, numClasses do
         local className = STRING.des(cursor)
         local classIndex = VLQ.des(cursor)
-        local objIds
-
-        if version == 2 then
-            objIds = AccI32.des(cursor)
-        else
-            objIds = {}
-
-            if version == 1 then
-                local numObjs = VLQ.des(cursor)
-                local prev = 0
-
-                for i = 1, numObjs do
-                    local delta = VLQ.des(cursor)
-                    local id = prev + delta
-                    
-                    table.insert(objIds, id)
-                    prev = id
-                end
-            end
-        end
+        local objIds = AccI32.des(cursor)
 
         for i, id in objIds do
             objects[id] = Instance.new(className)
@@ -355,24 +334,16 @@ local function deserialize(buf: buffer): Instance
         local objectIds = classInfo.ObjectIds
 
         local setter = propSetters[propName]
-        local values = {}
-
-        if version == 2 then
-            local ok, result = PropSquash.DecompressArray(cursor, typeName)
-
-            if ok then
-                values = result
-            end
-        elseif version == 1 then
-            for j = 1, #objectIds do
-                local ok, result = PropSquash.Decompress(cursor, typeName)
-                values[j] = if ok then result else nil
-            end
-        end
+        local ok, result = PropSquash.DecompressArray(cursor, typeName)
+        local values = ok and result or {}
 
         for j, objectId in ipairs(objectIds) do
             local inst = objects[objectId]
             local value = values[j]
+
+            if typeName == "Ref" then
+                value = objects[value]
+            end
 
             if setter then
                 setter(inst, value)
@@ -387,21 +358,10 @@ local function deserialize(buf: buffer): Instance
             end
         end
     end
-    
+
     -- Deserialize hierarchy
-    local parentIds
+    local parentIds = AccI32.des(cursor)
 
-    if version == 2 then
-        parentIds = AccI32.des(cursor)
-    elseif version == 1 then
-        parentIds = {}
-
-        for i = 1, #objects do
-            local parentRef = VLQ.des(cursor)
-            parentIds[i] = parentRef
-        end
-    end
-    
     for i, object in ipairs(objects) do
         local parentRef = parentIds[i]
 
@@ -420,5 +380,6 @@ return table.freeze({
 
     Serialize = serialize,
     Deserialize = deserialize,
+
     SetApiDumpCacheSource = ApiDump.SetCacheSource,
 })

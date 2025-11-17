@@ -314,12 +314,41 @@ Arrays = {
     BrickColor = Interleaved.BrickColor,
     Color3 = Interleaved.Color3,
 
-    Int32 = Interleaved.I32,
     Float32 = Interleaved.F32,
+    Int32 = Interleaved.I32,
+
+    EnumItem = {
+        ser = function (cursor, roblox: {EnumItem})
+            local values = {}
+            
+            for i = 1, #roblox do
+                local enumItem = roblox[i]
+                values[i] = enumItem.Value
+            end
+
+            local name = tostring(roblox[1].EnumType)
+            Interleaved.I32.ser(cursor, values)
+            STRING.ser(cursor, name)
+        end,
+
+        des = function (cursor)
+            local name = STRING.des(cursor)
+            local enumType: Enum = (Enum :: any)[name]
+            
+            local values = Interleaved.I32.des(cursor)
+            local items = {}
+            
+            for i = 1, #values do
+                local value = values[i]
+                items[i] = enumType:FromValue(value)
+            end
+
+            return items
+        end,
+    },
 
     UDim = Interleaved.UDim,
     UDim2 = Interleaved.UDim2,
-
     Rect = Interleaved.Rect,
 
     Ref = {
@@ -344,6 +373,59 @@ Arrays = {
             end
 
             AccI32.ser(cursor, objectIds)
+        end,
+    },
+
+    String = {
+        ser = function (cursor, roblox: {string})
+            local ids = {}
+            local strings = {}
+            local stringMap = {}
+
+            for i, str in ipairs(roblox) do
+                if stringMap[str] == nil then
+                    local id = #strings + 1
+                    strings[id] = str
+                    stringMap[str] = id
+                end
+
+                local id = stringMap[str]
+                ids[i] = id
+            end
+
+            for i = #ids, 1, -1 do
+                local id = ids[i]
+                VLQ.ser(cursor, id)
+            end
+
+            VLQ.ser(cursor, #ids)
+
+            for i = #strings, 1, -1 do
+                local str = strings[i]
+                STRING.ser(cursor, str)
+            end
+            
+            VLQ.ser(cursor, #strings)
+        end,
+
+        des = function (cursor)
+            local numStrings = VLQ.des(cursor)
+            local strings = table.create(numStrings, "")
+
+            for i = 1, numStrings do
+                local str = STRING.des(cursor)
+                strings[i] = str
+            end
+
+            local numIds = VLQ.des(cursor)
+            local allStrings = table.create(numIds, "")
+
+            for i = 1, numIds do
+                local id = VLQ.des(cursor)
+                allStrings[i] = strings[id]
+            end
+
+            return allStrings
         end,
     },
 
