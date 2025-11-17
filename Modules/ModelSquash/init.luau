@@ -111,6 +111,8 @@ local function serialize(root: Instance): buffer
                 continue
             end
 
+            name = name:sub(1, 1):upper() .. name:sub(2) -- Ensure property name is capitalized
+
             if member.Security.Write ~= "None" then
                 continue
             end
