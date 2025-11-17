@@ -1,0 +1,11 @@
+[package]
+name = "maximumadhd/array-squash"
+description = "ArraySquash - A module for compressing arrays of Roblox datatypes via Squash and byte interleaving."
+version = "1.0.0"
+license = "MIT"
+authors = ["MaximumADHD"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[dependencies]
+Squash = "data-oriented-house/squash@4.1.0"

@@ -3,19 +3,31 @@
 
 --!strict
 local Shared = script.Parent.Parent
+
 local Squash = require(Shared.Squash)
+local ArraySquash = require(Shared.ArraySquash)
+
+local Accumulated = ArraySquash.Accumulated
+local Interleaved = ArraySquash.Interleaved
+
+local AccI32 = Accumulated.I32
 
 type Cursor = Squash.Cursor
+type SerDes<T...> = Squash.SerDes<T...>
 
-local Types: {
-    [string]: {
-        des: (Cursor) -> any,
-        ser: (Cursor, any) -> (),
-    }
+local Singulars: {
+    [string]: SerDes<any>,
 }
 
-local compress: (cursor: Cursor, propType: string, value: any) -> boolean
-local decompress: (cursor: Cursor, propType: string) -> (boolean, any)
+local Arrays: {
+    [string]: SerDes<{ any }>,
+}
+
+local compress: (cursor: Cursor, propertyType: string, value: any) -> boolean
+local decompress: (cursor: Cursor, ty: string) -> (boolean, any)
+
+local compressArray: (cursor: Cursor, propType: string, values: {any}) -> boolean
+local decompressArray: (cursor: Cursor, propType: string) -> (boolean, any)
 
 local U8 = Squash.u8()
 local U16 = Squash.u16()
@@ -58,6 +70,7 @@ local TypeEnum = table.freeze({
     Vector3 = 29,
     Vector3int16 = 30,
     OptionalCFrame = 31,
+    Ref = 32,
 })
 
 local TypeIds = {} :: {
@@ -81,7 +94,7 @@ local SystemTypes = table.freeze({
     bool = "Bool",
 })
 
-Types = {
+Singulars = {
     Attributes = {
         des = function(cursor)
             local output = {}
@@ -90,7 +103,7 @@ Types = {
             for i = 1, numAttributes do
                 local key = STRING.des(cursor)
                 local valueTypeId = U16.des(cursor)
-                
+
                 local valueType = TypeIds[valueTypeId]
                 local ok, result = decompress(cursor, valueType)
 
@@ -117,7 +130,7 @@ Types = {
                     numAttributes += 1
                 end
             end
-            
+
             for key, value in roblox do
                 if key == "__msref" then
                     continue
@@ -132,13 +145,12 @@ Types = {
                     STRING.ser(cursor, key)
                 end
             end
-            
+
             VLQ.ser(cursor, numAttributes)
         end,
     },
 
     Axes = Squash.Axes(),
-    Bool = Squash.boolean(),
     BrickColor = Squash.BrickColor(),
 
     CFrame = CFRAME,
@@ -153,7 +165,7 @@ Types = {
             return Color3.fromRGB(r, g, b)
         end,
 
-        ser = function (cursor, roblox)
+        ser = function (cursor, roblox: Color3)
             local r = math.clamp(math.round(roblox.R * 255), 0, 255)
             local g = math.clamp(math.round(roblox.G * 255), 0, 255)
             local b = math.clamp(math.round(roblox.B * 255), 0, 255)
@@ -169,7 +181,7 @@ Types = {
     Content = {
         des = function (cursor)
             local sourceType = Squash.EnumItem(Enum.ContentSourceType).des(cursor)
-            
+
             if sourceType == Enum.ContentSourceType.Uri then
                 local uri = STRING.des(cursor)
                 return Content.fromUri(uri)
@@ -182,13 +194,13 @@ Types = {
 
         ser = function (cursor, roblox: Content)
             local sourceType = roblox.SourceType
-            
+
             if sourceType == Enum.ContentSourceType.Uri then
                 STRING.ser(cursor, roblox.Uri or "")
             elseif sourceType ~= Enum.ContentSourceType.None then
                 warn("Serializing Content of SourceType", tostring(sourceType), "is not supported!")
             end
-            
+
             Squash.EnumItem(Enum.ContentSourceType).ser(cursor, sourceType)
         end,
     },
@@ -199,7 +211,7 @@ Types = {
         des = function (cursor)
             local enumType = STRING.des(cursor)
             local value = U32.des(cursor)
-            
+
             local enum: Enum = (Enum :: any)[enumType]
             return enum:FromValue(value)
         end,
@@ -228,7 +240,7 @@ Types = {
             if isPresent then
                 return CFRAME.des(cursor)
             end
-            
+
             return nil
         end,
 
@@ -244,6 +256,11 @@ Types = {
     PhysicalProperties = Squash.opt(Squash.PhysicalProperties()),
     Ray = Squash.Ray(F32),
     Rect = Squash.Rect(F32),
+
+    Region3int16 = Squash.Region3int16(),
+    String = STRING,
+    UDim = Squash.UDim(F32),
+    UDim2 = Squash.UDim2(F32),
 
     Ref = {
         des = VLQ.des,
@@ -261,11 +278,6 @@ Types = {
             VLQ.ser(cursor, 0)
         end,
     },
-
-    Region3int16 = Squash.Region3int16(),
-    String = STRING,
-    UDim = Squash.UDim(F32),
-    UDim2 = Squash.UDim2(F32),
 
     Tags = {
         ser = function (cursor, roblox)
@@ -292,43 +304,127 @@ Types = {
 
     Vector2 = Squash.Vector2(F32),
     Vector3 = Squash.Vector3(F32),
+
     Vector3int16 = Squash.Vector3int16(),
 }
 
-decompress = function (cursor, ty)
-    local typeImpl = Types[ty]
+Arrays = {
+    Bool = Squash.array(BOOL),
 
-    if typeImpl == nil then
-        return false, "Couldn't decode value " .. tostring(ty)
+    BrickColor = Interleaved.BrickColor,
+    Color3 = Interleaved.Color3,
+
+    Int32 = Interleaved.I32,
+    Float32 = Interleaved.F32,
+
+    UDim = Interleaved.UDim,
+    UDim2 = Interleaved.UDim2,
+
+    Rect = Interleaved.Rect,
+
+    Ref = {
+        des = AccI32.des,
+
+        ser = function (cursor, roblox: {Instance?})
+            local objectIds = {}
+
+            for i = 1, #roblox do
+                local inst = roblox[i]
+                local id = 0
+
+                if inst then
+                    local refId = inst:GetAttribute("__msref")
+
+                    if type(refId) == "number" then
+                        id = refId
+                    end
+                end
+
+                objectIds[i] = id
+            end
+
+            AccI32.ser(cursor, objectIds)
+        end,
+    },
+
+    Vector2 = Interleaved.Vector2,
+    Vector3 = Interleaved.Vector3,
+}
+
+decompress = function (cursor: Cursor, ty: string)
+    local singular = Singulars[ty]
+
+    if singular then
+        return true, singular.des(cursor)
     end
 
-    return true, typeImpl.des(cursor)
+    return false, ("ModelSquash - Missing decoder for property type %q"):format(ty)
 end
 
-compress = function (cursor, propertyType, rbxValue)
-    assert(propertyType ~= nil, "ModelSquash - Property type descriptor is required")
-    local typeImpl = Types[propertyType]
-    
-    if typeImpl == nil then
-        local systemType = SystemTypes[propertyType]
-        typeImpl = Types[systemType]
-        
-        if typeImpl == nil then
-            return false, ("ModelSquash - Missing encoder for property type %q"):format(propertyType)
-        else
-            propertyType = systemType
-        end
+decompressArray = function (cursor, ty)
+    local arrayImpl = Arrays[ty]
+
+    if arrayImpl then
+        return true, arrayImpl.des(cursor)
     end
 
-    typeImpl.ser(cursor, rbxValue)
-    return true
+    local singular = Singulars[ty]
+
+    if singular ~= nil then
+        local array = Squash.array(singular)
+        return true, array.des(cursor)
+    end
+
+    return false, "Couldn't decode values: " .. tostring(ty)
+end
+
+compress = function (cursor: Cursor, propertyType: string, value: any)
+    local singular = Singulars[propertyType]
+
+    if singular then
+        singular.ser(cursor, value)
+        return true
+    end
+
+    return false, ("ModelSquash - Missing encoder for property type %q"):format(propertyType)
+end
+
+compressArray = function (cursor, propertyType, rbxValues)
+    assert(propertyType ~= nil, "ModelSquash - Property type descriptor is required")
+    local isDefined = Singulars[propertyType] ~= nil or Arrays[propertyType] ~= nil
+
+    if not isDefined then
+        local systemType = SystemTypes[propertyType]
+        propertyType = systemType or propertyType
+    end
+
+    local arrayImpl = Arrays[propertyType]
+
+    if arrayImpl then
+        arrayImpl.ser(cursor, rbxValues)
+        return true
+    end
+
+    local singular = Singulars[propertyType]
+
+    if singular then
+        local array = Squash.array(singular)
+        array.ser(cursor, rbxValues)
+        return true
+    end
+
+    return false, ("ModelSquash - Missing encoder for property type %q"):format(propertyType)
 end
 
 return table.freeze({
     SystemTypes = SystemTypes,
+
+    DecompressArray = decompressArray,
+    CompressArray = compressArray,
+
     Decompress = decompress,
     Compress = compress,
-    
+
     TypeEnum = TypeEnum,
     TypeIds = TypeIds,
 })
