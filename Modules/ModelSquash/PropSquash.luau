@@ -153,7 +153,7 @@ Singulars = {
     Axes = Squash.Axes(),
     BrickColor = Squash.BrickColor(),
 
-    Boolean = BOOL,
+    Bool = BOOL,
     CFrame = CFRAME,
     Color3 = Squash.Color3(),
 
