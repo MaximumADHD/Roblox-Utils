@@ -239,8 +239,8 @@ Singulars = {
     Float64 = Squash.f64(),
     Font = Squash.Font(),
 
-    int = Squash.i32(),
-    int64 = Squash.i64(),
+    Int32 = Squash.i32(),
+    Int64 = Squash.i64(),
 
     NumberSequence = Squash.NumberSequence(F32),
     NumberRange = Squash.NumberRange(F32),
