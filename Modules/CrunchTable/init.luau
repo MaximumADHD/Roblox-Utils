@@ -94,11 +94,9 @@ local function stringIO(size: number)
         end,
 
         Writer = function(buf: buffer, offset: number, value: string)
-            local buf = buffer.create(size)
-
             for i = 1, math.min(#value, size) do
                 local char = value:sub(i, i)
-                buffer.writeu8(buf, i - 1, char:byte())
+                buffer.writeu8(buf, offset + i - 1, char:byte())
             end
         end,
     }

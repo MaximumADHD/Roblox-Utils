@@ -56,6 +56,11 @@ export type Ownership = {
     InfoType: Enum.InfoType,
 }
 
+export type VapidOwnership = {
+    Id: number?,
+    InfoType: Enum.InfoType?,
+}
+
 export type ProductInfo = {
     AssetId: number,
     AssetTypeId: number,
@@ -94,16 +99,16 @@ local playerOwnsItem = Promise.promisify(function(player: Player, itemId: any, i
     elseif infoType == Enum.InfoType.GamePass then
         return MarketplaceService:UserOwnsGamePassAsync(player.UserId, itemId)
     elseif infoType == Enum.InfoType.Bundle then
-        return MarketplaceService:PlayerOwnsBundle(player, itemId)
+        return MarketplaceService:PlayerOwnsBundleAsync(player, itemId)
     elseif infoType == Enum.InfoType.Product then
         return false
     else
-        return MarketplaceService:PlayerOwnsAsset(player, itemId)
+        return MarketplaceService:PlayerOwnsAssetAsync(player, itemId)
     end
 end)
 
 local getProductInfo = Promise.promisify(function(id: number, infoType: Enum.InfoType?)
-    return MarketplaceService:GetProductInfo(id, infoType)
+    return MarketplaceService:GetProductInfoAsync(id, infoType)
 end)
 
 local GRANT_PURCHASE = Network.Event("Marketplace_GrantPurchase", function (player, id, infoType)
@@ -162,7 +167,7 @@ local function promiseOwnership(player: Player, id: number, infoType: Enum.InfoT
         local new = Promise.retryWithDelay(playerOwnsItem, 5, 2, player, id, infoType)
         data.Promise = new
 
-        new:catch(function()
+        new:catch(function(err)
             if data.Promise == new then
                 data.Promise = nil
             end
@@ -203,14 +208,14 @@ local function promiseProductInfo(id: number, infoType: Enum.InfoType?): Promise
     return promise
 end
 
-local function bulkResolveOwnership(player: Player, ownershipList: { Ownership }): Promise
+local function bulkResolveOwnership(player: Player, ownershipList: { VapidOwnership }): Promise
     local n = #ownershipList
     local promises = table.create(n) :: { Promise }
 
     for i = 1, n do
         local rec = ownershipList[i]
 
-        if rec.Id == 0 then
+        if rec.Id == nil or rec.Id <= 0 then
             promises[i] = Promise.resolve(false)
             continue
         end

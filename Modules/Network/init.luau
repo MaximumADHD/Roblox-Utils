@@ -38,7 +38,7 @@ function Event.Client<T...>(self: Class<T...>): Client<T...>
 end
 
 local eventIndex = {} :: {
-    [string]: Class?
+    [string]: Class
 }
 
 local function newEvent<T...>(id: string | EventOptions, validate: Validator<T...>): Class<T...>
@@ -54,16 +54,27 @@ local function newEvent<T...>(id: string | EventOptions, validate: Validator<T..
             reliable = id.Reliable
         elseif id.Unreliable ~= nil then
             reliable = not id.Unreliable
+        else
+            reliable = true
         end
     end
+
+    assert(name, "Event name must be provided!")
+    assert(validate, "Event validator must be provided!")
 
     local event: Class<T...> = setmetatable({
         Id = name,
         Reliable = reliable,
+
+        _client = nil :: Client<T...>?,
+        _server = nil :: Server<T...>?,
     }, Event)
     
-    assert(eventIndex[name] == nil, `Event with name {name} already exists!`)
-    eventIndex[name] = event
+    if eventIndex[name] then
+        error(`Event with name {name} already exists!`)
+    end
+    
+    eventIndex[name] = event :: any
 
     if RunContext.IsEdit then
         local server = Server.new(name, validate)
@@ -122,6 +133,24 @@ local function newEvent<T...>(id: string | EventOptions, validate: Validator<T..
     return event
 end
 
+local function newReliableEvent<T...>(name: string, validate: Validator<T...>): Class<T...>
+    local options: EventOptions | string = {
+        Name = name,
+        Reliable = true
+    }
+    
+    return newEvent(options, validate)
+end
+
+local function newUnreliableEvent<T...>(name: string, validate: Validator<T...>): Class<T...>
+    local options: EventOptions | string = {
+        Name = name,
+        Unreliable = true
+    }
+    
+    return newEvent(options, validate)
+end
+
 local function createEventReceiver<T...>(reliable: boolean, nameIndex: number, consumer: (Class, T...) -> ())
     return function (...)
         local args = { ... }
@@ -160,4 +189,6 @@ end
 
 return table.freeze({
     Event = newEvent,
+    ReliableEvent = newReliableEvent,
+    UnreliableEvent = newUnreliableEvent,
 })

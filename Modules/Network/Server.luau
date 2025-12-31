@@ -64,7 +64,8 @@ local function newServer<T...>(id: string, validate: Validator<T...>): Class<T..
     return setmetatable({
         Id = id,
         Validator = validate,
-        Dispatch = Signal.new() :: any,
+        Receiver = nil :: ((Player, T...) -> ())?,
+        Dispatch = Signal.new() :: Signal<(Player, T...)>,
     }, Server)
 end
 

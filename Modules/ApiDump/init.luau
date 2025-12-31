@@ -124,6 +124,7 @@ export type TagMap = {
     Settings: true?,
     NotBrowsable: true?,
     WriteOnly: true?,
+    SupportsStyling: true?,
 }
 
 export type ApiDump = {

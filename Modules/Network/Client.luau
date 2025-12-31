@@ -34,7 +34,8 @@ local function newClient<T...>(id: string, validate: Validator<T...>): Class<T..
     return setmetatable({
         Id = id,
         Validator = validate,
-        Dispatch = Signal.new() :: any,
+        Receiver = nil :: ((T...) -> ())?,
+        Dispatch = Signal.new() :: Signal<T...>,
     }, Client)
 end
 

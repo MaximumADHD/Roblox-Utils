@@ -1,7 +1,7 @@
 [package]
 name = "maximumadhd/marketplace"
 description = "Marketplace - An all-in-one lightweight solution for handling and mocking in-game purchases."
-version = "1.0.1"
+version = "1.0.2"
 license = "MIT"
 authors = ["MaximumADHD"]
 registry = "https://github.com/UpliftGames/wally-index"

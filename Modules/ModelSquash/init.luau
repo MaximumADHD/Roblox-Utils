@@ -1,9 +1,9 @@
 local Shared = script.Parent
 local Squash = require(Shared.Squash)
 
-local ApiDump = require(Shared.ApiDump)
 local PropSquash = require(script.PropSquash)
 local ArraySquash = require(Shared.ArraySquash)
+local ReflectionService = game:GetService("ReflectionService")
 
 local Accumulated = ArraySquash.Accumulated
 local AccI32 = Accumulated.I32
@@ -12,8 +12,6 @@ local STRING = Squash.string()
 local VLQ = Squash.vlq()
 
 type Cursor = Squash.Cursor
-type ApiDump = ApiDump.ApiDump
-type TypeCategory = ApiDump.TypeCategory
 
 type INST = {
     Index: number,
@@ -26,6 +24,63 @@ type PROP = {
     TypeIndex: number,
     Values: { any },
 }
+
+---------------------------------------------------------------------------------------
+-- FIXME BEGIN: Remove these once Luau LSP properly grabs these type declarations
+
+type ReflectionType = {
+    EngineType: string,
+    ScriptType: string?,
+    EnumType: string?,
+    InstanceType: string?
+}
+
+type ReflectedProperty = {
+    Name: string,
+    Serialized: boolean,
+
+    Type: ReflectionType,
+    ContentType: Enum.AssetType?,
+    -- DefaultValue: any,
+    -- MinValue: number?,
+    -- MaxValue: number?
+
+    Display: {
+        Category: string,
+        DeprecationMessage: string?,
+        LayoutOrder: number,
+    }?,
+
+    Permits: {
+        Read: SecurityCapabilities?,
+        ReadParallel: SecurityCapabilities?,
+        Write: SecurityCapabilities?,
+        WriteParallel: SecurityCapabilities?,
+    },
+}
+
+type ReflectedClass = {
+    Name: string,
+    Superclass: string?,
+    Subclasses: { string },
+
+    Display: {
+        Category: string,
+        DeprecationMessage: string?,
+        LayoutOrder: number,
+    }?,
+
+    Permits: {
+        GetService: SecurityCapabilities?,
+        New: SecurityCapabilities?,
+    }
+}
+
+type ReflectedProperties = { ReflectedProperty }
+type ReflectedClasses = { ReflectedClass }
+
+-- FIXME END
+---------------------------------------------------------------------------------------
 
 local propSetters = {} :: {
     [string]: (Instance, any) -> ()
@@ -45,11 +100,6 @@ end
 
 local function serialize(root: Instance): buffer
     local cursor = Squash.cursor()
-    local apiDumpGet = ApiDump.Get()
-
-    if not apiDumpGet.Success then
-        error("ModelSquash - API Dump source not set or failed to load!")
-    end
 
     local instances: { Instance } = root:GetDescendants()
     table.insert(instances, 1, root) -- Include the root instance
@@ -84,61 +134,33 @@ local function serialize(root: Instance): buffer
     end
 
     -- Collect properties
-    local apiDump = apiDumpGet.ApiDump
     local props = {}
 
     for i, className in ipairs(classNames) do
-        local members = ApiDump.GetMembersOfClass(apiDump, className)
-        local defaults = ApiDump.GetDefaultValues(apiDump, className)
-
-        if not defaults then
-            continue
-        end
-
         local class = classMap[className]
         local objectIds = class.ObjectIds
+        local propData: ReflectedProperties = ReflectionService:GetPropertiesOfClass(className)
 
-        for name, default in defaults do
-            local member = members[name]
+        for i, prop in propData do
+            local display = prop.Display
+            local permits = prop.Permits
 
-            if member.MemberType ~= "Property" then
+            if not (prop.Serialized and permits.Write) then
                 continue
             end
 
-            local tags = ApiDump.GetTags(member)
-
-            if tags.ReadOnly or tags.Deprecated or tags.NotReplicated then
+            if display and display.DeprecationMessage then
                 continue
             end
 
-            name = name:sub(1, 1):upper() .. name:sub(2) -- Ensure property name is capitalized
+            local name = prop.Name
+            local propType = prop.Type
 
-            if member.Security.Write ~= "None" then
-                continue
-            end
-
-            local valueType = member.ValueType
-            local category = valueType.Category
-
-            local typeName = 
-                if category == "Class" then
-                    "Ref"
-                elseif category == "Enum" then
-                    "EnumItem"
-                else
-                    valueType.Name
-
-            local typeIndex = PropSquash.TypeEnum[typeName]
+            local engineType = propType.EngineType
+            local typeIndex = PropSquash.TypeEnum[engineType]
 
             if typeIndex == nil then
-                local systemType = PropSquash.SystemTypes[typeName]
-
-                if systemType then
-                    typeName = systemType
-                    typeIndex = PropSquash.TypeEnum[typeName]
-                else
-                    continue
-                end
+                continue
             end
 
             local prop = {
@@ -150,17 +172,8 @@ local function serialize(root: Instance): buffer
 
             for i, objectId in ipairs(objectIds) do
                 local instance = instances[objectId]
-
-                local success, robloxValue = pcall(function ()
-                    return (instance :: any)[name]
-                end)
-
-                if not success then
-                    warn("ModelSquash - Could not get property value:", className, name, robloxValue)
-                    robloxValue = default
-                end
-
-                table.insert(prop.Values, robloxValue)
+                local value = (instance :: any)[name]
+                table.insert(prop.Values, value)
             end
 
             table.insert(props, prop)
@@ -382,6 +395,4 @@ return table.freeze({
 
     Serialize = serialize,
     Deserialize = deserialize,
-
-    SetApiDumpCacheSource = ApiDump.SetCacheSource,
 })

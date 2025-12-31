@@ -83,15 +83,25 @@ end
 
 --- Disambiguates Roblox/Luau types
 --- into the type names used here.
-local SystemTypes = table.freeze({
+local TypeAliases = table.freeze({
+    -- Luau types
+    boolean = "Bool",
+    number = "Float64",
+    string = "String",
+
+    -- Roblox Engine Types
+    bool = "Bool",
     int = "Int32",
     int64 = "Int64",
     float = "Float32",
     double = "Float64",
-    string = "String",
-    number = "Float64",
-    boolean = "Bool",
-    bool = "Bool",
+
+    OptionalCoordinateFrame = "OptionalCFrame",
+    CoordinateFrame = "CFrame",
+
+    RefType = "Ref",
+    Rect2D = "Rect",
+    Enum = "EnumItem",
 })
 
 Singulars = {
@@ -228,8 +238,9 @@ Singulars = {
 
     Float64 = Squash.f64(),
     Font = Squash.Font(),
-    Int32 = Squash.i32(),
-    Int64 = Squash.i64(),
+
+    int = Squash.i32(),
+    int64 = Squash.i64(),
 
     NumberSequence = Squash.NumberSequence(F32),
     NumberRange = Squash.NumberRange(F32),
@@ -477,8 +488,8 @@ compressArray = function (cursor, propertyType, rbxValues)
     local isDefined = Singulars[propertyType] ~= nil or Arrays[propertyType] ~= nil
 
     if not isDefined then
-        local systemType = SystemTypes[propertyType]
-        propertyType = systemType or propertyType
+        local alias = TypeAliases[propertyType]
+        propertyType = alias or propertyType
     end
 
     local arrayImpl = Arrays[propertyType]
@@ -500,14 +511,13 @@ compressArray = function (cursor, propertyType, rbxValues)
 end
 
 return table.freeze({
-    SystemTypes = SystemTypes,
+    TypeAliases = TypeAliases,
+    TypeEnum = TypeEnum,
+    TypeIds = TypeIds,
 
     DecompressArray = decompressArray,
     CompressArray = compressArray,
 
     Decompress = decompress,
     Compress = compress,
-
-    TypeEnum = TypeEnum,
-    TypeIds = TypeIds,
 })
