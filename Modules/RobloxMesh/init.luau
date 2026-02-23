@@ -87,7 +87,6 @@ local Buffer = require(script.Buffer)
 local RunContext = require(Shared.RunContext)
 
 local FACS_ACTION_MAP = {}
-local DEG2RAD = math.pi / 180
 
 local DRACO_NORMAL_ID = 1
 local DRACO_TANGENT_ID = 3
@@ -215,10 +214,10 @@ local function readAsciiMesh(file: string): Class
     local function nextVector2(): Vector2
         xs, ys, zs = readXYZ()
 
-        x = tonumber(xs)
-        y = tonumber(ys)
+        local u = tonumber(xs) or 0
+        local v = tonumber(ys) or 0
 
-        return Vector2.new(x, y)
+        return Vector2.new(u, 1 - v)
     end
 
     local verts: { Vertex } = {}
@@ -572,7 +571,7 @@ local function readFACS(buf: Buffer, boneMap: { [string]: Bone }): FacsData
         local refA = faceControlNames[indexA]
         local refB = faceControlNames[indexB]
 
-        table.insert(poseNames, `x2_{refA}x{refB}`)
+        table.insert(poseNames, `x2_{refA}_{refB}`)
     end
 
     for i = 1, numThreePoseCorrectives do
@@ -593,7 +592,7 @@ local function readFACS(buf: Buffer, boneMap: { [string]: Bone }): FacsData
         local refB = faceControlNames[indexB]
         local refC = faceControlNames[indexC]
 
-        table.insert(poseNames, `x3_{refA}x{refB}x{refC}`)
+        table.insert(poseNames, `x3_{refA}_{refB}_{refC}`)
     end
 
     local posTblX, posTblY, posTblZ, 
@@ -614,9 +613,9 @@ local function readFACS(buf: Buffer, boneMap: { [string]: Bone }): FacsData
             local posY = posTblY[i]
             local posZ = posTblZ[i]
 
-            local rotX = rotTblX[i] * DEG2RAD
-            local rotY = rotTblY[i] * DEG2RAD
-            local rotZ = rotTblZ[i] * DEG2RAD
+            local rotX = rotTblX[i]
+            local rotY = rotTblY[i]
+            local rotZ = rotTblZ[i]
             
             pose[boneName] = {
                 Position = Vector3.new(posX, posY, posZ),
@@ -732,6 +731,10 @@ local function readBinaryMesh(buf: Buffer, meshVersion: number): Class
     readSubsets(buf, verts, bones, skinning, numSubsets)
 
     -- Break faces up by LOD
+    if #lodOffsets == 0 then
+        lodOffsets = { 0, #faces }
+    end
+
     local lods = mapLodOffsets(faces, lodOffsets)
 
     -- Read FACS data
@@ -927,7 +930,7 @@ end
 --- Retrieves the pose data for a given FACS action unit, if it exists in the mesh's FACS data.
 function RobloxMesh.GetFacsPose(self: Class, pose: Enum.FacsActionUnit): FacsPose?
     if self.FACS then
-        return self.FACS[pose.Name]
+        return self.FACS.Poses[pose.Name]
     end
 
     return nil
@@ -936,8 +939,8 @@ end
 --- Retrieves the corrective pose data for a combination of two FACS action units, if it exists in the mesh's FACS data.
 function RobloxMesh.GetFacsCorrectiveX2(self: Class, poseA: Enum.FacsActionUnit, poseB: Enum.FacsActionUnit): FacsPose?
     if self.FACS then
-        local key = `x2_{poseA.Name}x{poseB.Name}`
-        return self.FACS[key]
+        local key = `x2_{poseA.Name}_{poseB.Name}`
+        return self.FACS.Poses[key]
     end
 
     return nil
@@ -946,8 +949,8 @@ end
 --- Retrieves the corrective pose data for a combination of three FACS action units, if it exists in the mesh's FACS data.
 function RobloxMesh.GetFacsCorrectiveX3(self: Class, poseA: Enum.FacsActionUnit, poseB: Enum.FacsActionUnit, poseC: Enum.FacsActionUnit): FacsPose?
     if self.FACS then
-        local key = `x3_{poseA.Name}x{poseB.Name}x{poseC.Name}`
-        return self.FACS[key]
+        local key = `x3_{poseA.Name}_{poseB.Name}_{poseC.Name}`
+        return self.FACS.Poses[key]
     end
 
     return nil
