@@ -365,7 +365,7 @@ local function readSubsets(buf: Buffer, verts: { Vertex }, bones: { Bone }, skin
     for i = 1, count do
         skip(buf, 4) -- u32 facesBegin
         skip(buf, 4) -- u32 facesLength
-        
+
         local vertsBegin = readU32(buf)
         local vertsEnd = vertsBegin + readU32(buf)
 
@@ -376,9 +376,9 @@ local function readSubsets(buf: Buffer, verts: { Vertex }, bones: { Bone }, skin
             boneSubset[b] = readU16(buf)
         end
 
-        for v = vertsBegin + 1, vertsEnd do
-            local vert = verts[v]
-            local set = skinning[v]
+        for v = vertsBegin, vertsEnd - 1 do
+            local vert = verts[v + 1]
+            local set = skinning[v + 1]
 
             for s = 1, 4 do
                 local subsetIndex = 1 + set.Bones[s]
@@ -995,7 +995,7 @@ function RobloxMesh.ComputeFacsTransforms(self: Class, snapshot: FaceControls | 
             local weightB = state[nameB] or 0
 
             local weight = weightA * weightB
-            state[`x2_\{{nameA}\}x\{{nameB}\}`] = weight
+            state[`x2_{nameA}_{nameB}`] = weight
         end
 
         for i, threePose in facs.ThreePoseCorrectives do
@@ -1009,7 +1009,7 @@ function RobloxMesh.ComputeFacsTransforms(self: Class, snapshot: FaceControls | 
             local weightC = state[nameC] or 0
 
             local weight = weightA * weightB * weightC
-            state[`x3_\{{nameA}\}x\{{nameB}\}x\{{nameC}\}`] = weight
+            state[`x3_{nameA}_{nameB}_{nameC}`] = weight
         end
 
         for i, boneName in facs.BoneNames do
@@ -1181,8 +1181,8 @@ function RobloxMesh.ToEditableMesh(self: Class, lod: number?): EditableMesh
         end
 
         for id, pose in facs.Poses do
-            local threePoseA, threePoseB, threePoseC = id:match("x3_{(%w+)}x{(%w)}x{(%w+)}")
-            local twoPoseA, twoPoseB = id:match("x2_{(%w+)}x{(%w+)}")
+            local threePoseA, threePoseB, threePoseC = id:match("x3_(%w+)_(%w+)_(%w+)")
+            local twoPoseA, twoPoseB = id:match("x2_(%w+)_(%w+)")
             local actions
 
             if threePoseA and threePoseB and threePoseC then

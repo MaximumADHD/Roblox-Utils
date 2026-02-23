@@ -2,7 +2,7 @@ local Draco = script.Parent
 local RobloxMesh = Draco.Parent
 local Buffer = require(RobloxMesh.Buffer)
 
-local DEBUG = true
+local DEBUG = false
 type Buffer = Buffer.Class
 
 local debugStack = 0

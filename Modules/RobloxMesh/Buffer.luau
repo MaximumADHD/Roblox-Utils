@@ -178,8 +178,8 @@ function Buffer.ReadBytes(self: Class, size: number): { number }
     local bytes = table.create(size, 0)
     checkRead(self, size)
 
-    for i = 0, size - 1 do
-        bytes[i + 1] = self:ReadUInt8()
+    for i = 1, size do
+        bytes[i] = self:ReadUInt8()
     end
 
     return bytes
@@ -222,37 +222,36 @@ function Buffer.ReadVector3(self: Class): Vector3
     return Vector3.new(x, y, z)
 end
 
-
 function Buffer.FlushBits(self: Class)
     self._bitsValue = 0
     self._bitsLength = 0
 end
 
 function Buffer.ReadBits(self: Class, n: number)
-	local bitsValue = self._bitsValue
-	local bitsLength = self._bitsLength
+    local bitsValue = self._bitsValue
+    local bitsLength = self._bitsLength
 
-	while bitsLength < n do
-		local byte = self:ReadUInt8()
-		
-		for i = 0, 7 do
-			bitsValue = bit32.bor(bit32.lshift(bitsValue, 1), bit32.band(bit32.rshift(byte, i), 1))
-		end
-		
-		bitsLength += 8
-	end
-	
-	local value = 0
-	
-	for bit = 0, n - 1 do
-		bitsLength -= 1
-		value = bit32.bor(value, bit32.lshift(bit32.band(bit32.rshift(bitsValue, bitsLength), 1), bit))
-	end
+    while bitsLength < n do
+        local byte = self:ReadUInt8()
+        
+        for i = 0, 7 do
+            bitsValue = bit32.bor(bit32.lshift(bitsValue, 1), bit32.band(bit32.rshift(byte, i), 1))
+        end
 
-	self._bitsValue = bitsValue
-	self._bitsLength = bitsLength
-	
-	return value
+        bitsLength += 8
+    end
+    
+    local value = 0
+    
+    for bit = 0, n - 1 do
+        bitsLength -= 1
+        value = bit32.bor(value, bit32.lshift(bit32.band(bit32.rshift(bitsValue, bitsLength), 1), bit))
+    end
+    
+    self._bitsValue = bitsValue
+    self._bitsLength = bitsLength
+    
+    return value
 end
 
 return Buffer
