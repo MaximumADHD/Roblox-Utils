@@ -88,9 +88,6 @@ local RunContext = require(Shared.RunContext)
 
 local FACS_ACTION_MAP = {}
 
-local DRACO_NORMAL_ID = 1
-local DRACO_TANGENT_ID = 3
-
 for i, item in Enum.FacsActionUnit:GetEnumItems() do
     FACS_ACTION_MAP[item.Name] = item
 end
@@ -150,7 +147,9 @@ local FACS_SHORT_NAME_MAP = table.freeze({
     r_ULR = "RightUpperLipRaiser",
 })
 
-table.freeze(FACS_ACTION_MAP)
+local DRACO_NORMAL_ID = 1
+local DRACO_TANGENT_ID = 3
+
 type Buffer = Buffer.Class
 
 --------------------------------------------------------------------
