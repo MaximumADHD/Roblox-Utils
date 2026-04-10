@@ -23,6 +23,14 @@
                     "$path": "Packages/PromiseBase.lua"
                 },
 
+                "React": {
+                    "$path": "Packages/React.lua"
+                },
+
+                "ReactRoblox": {
+                    "$path": "Packages/ReactRoblox.lua"
+                },
+
                 "Squash": {
                     "$path": "Packages/Squash.lua"
                 },
