@@ -89,9 +89,6 @@ local function DraggerToolComponent(props: Props)
 		props.DraggerSettings,
 	})
 
-	React.useEffect(function ()
-	end) 
-
 	-- Input wiring and render loop
 	React.useEffect(function ()
 		local mouse = props.Mouse
