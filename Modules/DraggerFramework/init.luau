@@ -58,6 +58,7 @@ local snapRotationToPrimaryDirection = require(Utility.snapRotationToPrimaryDire
 export type DraggerStateType = DraggerStateType.StateType
 export type DragTargetType = DragHelper.DragTargetType
 export type DragTarget = DragHelper.DragTarget
+export type Gizmo = DraggerContext.Gizmo
 
 export type PivotType = classifyPivot.PivotType
 export type Geometry = getGeometry.Geometry
