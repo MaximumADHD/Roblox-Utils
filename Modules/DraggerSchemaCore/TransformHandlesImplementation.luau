@@ -62,10 +62,15 @@ type TransformHandlesImplementation = {
 type Proto = typeof(TransformHandlesImplementation)
 export type Class = setmetatable<TransformHandlesImplementation, Proto>
 
-function TransformHandlesImplementation.new(draggerContext: DraggerContext, ikTransformFunction: IKTransformFunction): Class
+local function ikTransformNoOp(partMover: PartMover, transform: CFrame, collisionsMode: Enum.IKCollisionsMode): CFrame
+	partMover:transformTo(transform)
+	return transform
+end
+
+function TransformHandlesImplementation.new(draggerContext: DraggerContext, ikTransformFunction: IKTransformFunction?): Class
 	return setmetatable({
 		_draggerContext = draggerContext,
-		_ikTransformFunction = ikTransformFunction,
+		_ikTransformFunction = ikTransformFunction or ikTransformNoOp,
 		_centerPoint = CFrame.identity,
 		_partMover = PartMover.new(),
 		_attachmentMover = AttachmentMover.new(),

@@ -1,9 +1,16 @@
+local DraggerFramework = script.Parent.Parent
+local Utility = DraggerFramework.Utility
+
+local SelectionInfo = require(Utility.SelectionInfo)
+type SelectionInfo = SelectionInfo.Class
+
 --[[
 	Ignored handle hits: When the ToolImplementation's shouldBiasTowardsObject
 	function returns true, then this function will decide whether to ignore
 	handle clicks where the user clicked outside of the handle's visual, but
 	still within the handle's invisible hitbox.
 ]]
+
 local function isIgnoredHandleHit(handles: any, mouseRay: Ray, selectionInfo: any, hitItem: Instance?)
 	if not handles:shouldBiasTowardsObjects() then
 		-- Only potentially ignores if we're biased towards parts
@@ -26,8 +33,8 @@ HoverTracker.__index = HoverTracker
 
 type HoverTrackerData = {
 	_draggerSchema: any,
-	_handlesList: any,
-	_hoverHandleId: any?,
+	_handlesList: { any },
+	_hoverHandleId: string?,
 	_hoverItem: Instance?,
 	_hoverSelectable: Instance?,
 	_hoverDistance: number?,
@@ -40,7 +47,7 @@ type HoverTrackerData = {
 type Proto = typeof(HoverTracker)
 export type Class = setmetatable<HoverTrackerData, Proto>
 
-function HoverTracker.new(draggerSchema: any, handlesList: any, onHoverExternallyChangedFunction: () -> ()): Class
+function HoverTracker.new(draggerSchema: any, handlesList: { any }, onHoverExternallyChangedFunction: () -> ()): Class
 	assert(type(handlesList) == "table")
 	assert(type(draggerSchema) == "table")
 	
@@ -53,7 +60,7 @@ function HoverTracker.new(draggerSchema: any, handlesList: any, onHoverExternall
 	}, HoverTracker) :: Class
 end
 
-local function isCloser(distance: number, isOnTop: boolean, currentDistance: number, currentIsOnTop: boolean)
+local function isCloser(distance: number, isOnTop: boolean?, currentDistance: number, currentIsOnTop: boolean)
 	if currentIsOnTop then -- Neat logic
 		return isOnTop and distance < currentDistance
 	else
@@ -67,11 +74,12 @@ function HoverTracker.update(self: Class, draggerContext: any, currentSelection:
 
 	-- Hover parts in the workspace
 	local mouseRay = draggerContext:getMouseRay()
-	local hitSelectable, hitItem, distanceToHover =
-		self._draggerSchema.getMouseTarget(draggerContext, mouseRay, currentSelection)
+	local hitSelectable, hitItem, distanceToHover = self._draggerSchema.getMouseTarget(draggerContext, mouseRay, currentSelection)
+	
 	self._hoverItem = hitItem
 	self._hoverSelectable = hitSelectable
 	self._hoverHandleId = nil
+	
 	if hitSelectable ~= nil then
 		self._hoverDistance = distanceToHover
 		self._hoverPosition = mouseRay.Origin + mouseRay.Direction.Unit * distanceToHover
@@ -81,14 +89,15 @@ function HoverTracker.update(self: Class, draggerContext: any, currentSelection:
 		self._hoverPosition = nil
 	end
 
-	self._hoverHandles = nil
 	local currentIsOnTop = false
+	self._hoverHandles = nil
+
 	for _, handles in pairs(self._handlesList) do
 		-- Possibly hover a handle instead if we have a handle closer than the part
 		-- and the hit wasn't ignored by bias towards hovering parts.
-		local hoverHandleId, hoverHandleDistance, isOnTop = handles:hitTest(mouseRay, false)
+		local hoverHandleId: string?, hoverHandleDistance: number?, isOnTop: boolean? = handles:hitTest(mouseRay, false)
 
-		if hoverHandleId then
+		if hoverHandleId and hoverHandleDistance then
 			if isCloser(hoverHandleDistance, isOnTop, distanceToHover, currentIsOnTop) and
 				not isIgnoredHandleHit(handles, mouseRay, selectionInfo, hitItem) then
 				self._hoverHandles = handles
@@ -110,9 +119,9 @@ function HoverTracker.update(self: Class, draggerContext: any, currentSelection:
 	if self._onHoverChanged and self._hoverSelectable ~= oldHoverSelectable then
 		self:_freeHoverEscapeDetector()
 		if self._hoverSelectable then
-			self._hoverEscapeDetector =
-				self._draggerSchema.HoverEscapeDetector.new(
-					draggerContext, self._hoverSelectable, self._onHoverChanged)
+			self._hoverEscapeDetector = self._draggerSchema.HoverEscapeDetector.new(
+				draggerContext, self._hoverSelectable, self._onHoverChanged
+			)
 		end
 	end
 end

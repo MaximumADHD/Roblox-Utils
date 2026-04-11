@@ -18,12 +18,17 @@ local StandaloneSelectionBox = require(Components.StandaloneSelectionBox)
 
 local Implementation = DraggerFramework.Implementation
 local DraggerContext = require(Implementation.DraggerContext)
+local DraggerToolModel = require(Implementation.DraggerToolModel)
+local SelectionInfo = require(Utility.SelectionInfo)
 
 local ExtrudeHandle = {}
 ExtrudeHandle.__index = ExtrudeHandle
 
 type HandleProps = ScaleHandleView.Props
 type DraggerContext = DraggerContext.Class
+
+type DraggerToolModel = DraggerToolModel.Class
+type SelectionInfo = SelectionInfo.Class
 
 local NormalId = {
 	X_AXIS = 1,
@@ -70,33 +75,28 @@ local ScaleHandleDefinitions: { [string]: ScaleHandleDef } = {
 		Color = Colors.X_AXIS,
 		NormalId = NormalId.X_AXIS,
 	},
-
 	PlusX = {
-		Offset = CFrame.fromMatrix(Vector3.zero, Vector3.yAxis, Vector3.zAxis),
+		Offset = CFrame.fromMatrix(Vector3.zero, Vector3.yAxis, -Vector3.zAxis),
 		Color = Colors.X_AXIS,
 		NormalId = NormalId.X_AXIS,
 	},
-
 	MinusY = {
 		Offset = CFrame.fromMatrix(Vector3.zero, Vector3.zAxis, Vector3.xAxis),
 		Color = Colors.Y_AXIS,
 		NormalId = NormalId.Y_AXIS,
 	},
-
 	PlusY = {
 		Offset = CFrame.fromMatrix(Vector3.zero, Vector3.zAxis, -Vector3.xAxis),
 		Color = Colors.Y_AXIS,
 		NormalId = NormalId.Y_AXIS,
 	},
-
 	MinusZ = {
 		Offset = CFrame.fromMatrix(Vector3.zero, Vector3.xAxis, Vector3.yAxis),
 		Color = Colors.Z_AXIS,
 		NormalId = NormalId.Z_AXIS,
 	},
-
 	PlusZ = {
-		Offset = CFrame.fromMatrix(Vector3.zero, Vector3.xAxis, Vector3.yAxis),
+		Offset = CFrame.fromMatrix(Vector3.zero, Vector3.xAxis, -Vector3.yAxis),
 		Color = Colors.Z_AXIS,
 		NormalId = NormalId.Z_AXIS,
 	},
@@ -210,7 +210,7 @@ function ExtrudeHandle._summonHandles(self: Class)
 	return true
 end
 
-function ExtrudeHandle:_endSummon()
+function ExtrudeHandle._endSummon(self: Class)
 	if self._summonBasisOffset then
 		self._summonBasisOffset = nil
 	end
@@ -220,7 +220,7 @@ function ExtrudeHandle._getBasisOffset(self: Class)
 	return self._summonBasisOffset or self._basisOffset
 end
 
-function ExtrudeHandle.update(self: Class, draggerToolModel, selectionInfo)
+function ExtrudeHandle.update(self: Class, draggerToolModel: DraggerToolModel, selectionInfo: SelectionInfo)
 	if not self._draggingHandleId then
 		-- Don't clobber these fields while we're dragging because we're
 		-- updating the bounding box in a smart way given how we're moving the
@@ -330,11 +330,11 @@ function ExtrudeHandle._refreshDragIfNeeded(self: Class)
 	return refreshNeeded
 end
 
-function ExtrudeHandle.keyDown(self: Class, keyCode)
+function ExtrudeHandle.keyDown(self: Class, keyCode: Enum.KeyCode)
 	return self:_refreshDragIfNeeded()
 end
 
-function ExtrudeHandle.keyUp(self: Class, keyCode)
+function ExtrudeHandle.keyUp(self: Class, keyCode: Enum.KeyCode)
 	return self:_refreshDragIfNeeded()
 end
 
@@ -383,6 +383,7 @@ function ExtrudeHandle._getBoundingBoxColor(self: Class)
 	then
 		return Colors.SizeLimitReached
 	end
+
 	return self._draggerContext:getSelectionBoxColor()
 end
 
@@ -397,7 +398,7 @@ function ExtrudeHandle._shouldDrawBoundingBox(self: Class)
 		(self._props.ShowBoundingBox and #self._selectionWrapper:get() > 1)
 end
 
-function ExtrudeHandle.render(self: Class, hoveredHandleId: string)
+function ExtrudeHandle.render(self: Class, hoveredHandleId: string?)
 	local children = {} :: {
 		[string]: React.Node,
 	}
@@ -405,6 +406,7 @@ function ExtrudeHandle.render(self: Class, hoveredHandleId: string)
 	if self._draggingHandleId and self._handles[self._draggingHandleId] then
 		local handleProps = self._handles[self._draggingHandleId]
 		children[self._draggingHandleId] = React.createElement<<any>>(ScaleHandleView.render, {
+			GuiParent = self._draggerContext:getGuiParent(),
 			HandleCFrame = handleProps.HandleCFrame,
 			Color = handleProps.Color,
 			Scale = handleProps.Scale,
@@ -413,6 +415,7 @@ function ExtrudeHandle.render(self: Class, hoveredHandleId: string)
 		for otherHandleId, otherHandleProps in pairs(self._handles) do
 			if otherHandleId ~= self._draggingHandleId then
 				children[otherHandleId] = React.createElement<<any>>(ScaleHandleView.render, {
+					GuiParent = self._draggerContext:getGuiParent(),
 					HandleCFrame = otherHandleProps.HandleCFrame,
 					Color = Colors.makeDimmed(otherHandleProps.Color),
 					Scale = otherHandleProps.Scale,
@@ -433,6 +436,7 @@ function ExtrudeHandle.render(self: Class, hoveredHandleId: string)
 			end
 			
 			children[handleId] = React.createElement<<any>>(ScaleHandleView.render, {
+				GuiParent = self._draggerContext:getGuiParent(),
 				HandleCFrame = handleProps.HandleCFrame,
 				Color = color,
 				Scale = handleProps.Scale,
@@ -492,7 +496,8 @@ function ExtrudeHandle.mouseDown(self: Class, mouseRay: Ray, handleId: string?)
 	self._implementation:beginScale(
 		self._selectionWrapper:get(),
 		self._selectionInfo,
-		self._normalId or 0)
+		self._normalId or 0
+	)
 end
 
 -- Clamp x between min and max while changing it in increments of step (when step is nonzero)
@@ -520,12 +525,15 @@ local function computeDeltaSizeMultiaxis(originalSize: Vector3, delta: number, a
 	if gridStep < 0.01 then
 		gridStep = 0
 	end
+
 	local originalSizeArray = Math.vectorToArray(originalSize)
 	local minDeltaSizeArray = Math.vectorToArray(minSize - originalSize)
 	local maxDeltaSizeArray = Math.vectorToArray(maxSize - originalSize)
+
 	local actualDelta = clampWithStep(delta, minDeltaSizeArray[axisId],  maxDeltaSizeArray[axisId], gridStep)
 	local ratio = actualDelta / originalSizeArray[axisId]
 	local deltaSize = originalSize * Math.setToVector3(axesToScale) * ratio
+	
 	return deltaSize, actualDelta
 end
 
@@ -572,10 +580,17 @@ function ExtrudeHandle.mouseDrag(self: Class, mouseRay: Ray)
 	local gridSize = self._draggerContext:getGridSize()
 	local minSize = self._minimumSize
 	local maxSize = self._maximumSize
-	deltaSize, actualDelta = computeDeltaSizeMultiaxis(originalSize, delta, normalId, axesToScale, gridSize, minSize, maxSize)
+
+	deltaSize, actualDelta = computeDeltaSizeMultiaxis(
+		originalSize, delta, 
+		normalId, axesToScale, 
+		gridSize, minSize, maxSize
+	)
+
 	if delta ~= 0 then
 		localOffset = localOffset * (actualDelta / delta)
 	end
+
 	self._scalingLimitReachedUpper = delta - actualDelta > 0
 	self._scalingLimitReachedLower = actualDelta - delta > 0
 
@@ -586,12 +601,14 @@ function ExtrudeHandle.mouseDrag(self: Class, mouseRay: Ray)
 	if deltaSizeToApply:FuzzyEq(Vector3.zero) then
 		deltaSizeToApply = Vector3.zero
 	end
+
 	if localOffsetToApply:FuzzyEq(Vector3.zero) then
 		localOffsetToApply = Vector3.zero
 	end
 
 	self._lastDeltaSize, self._lastOffset =
 		self._implementation:updateScale(deltaSizeToApply, localOffsetToApply)
+	
 	self._resizeWasConstrained = (deltaSizeToApply ~= self._lastDeltaSize)
 	self._boundingBox.CFrame = self._originalBoundingBoxCFrame * CFrame.new(self._lastOffset - self._committedOffset)
 	self._boundingBox.Size = originalSize + (self._lastDeltaSize - self._committedDeltaSize)

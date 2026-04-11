@@ -3,6 +3,7 @@ local Components = script.Components
 local Handles = script.Handles
 local Utility = script.Utility
 
+local DraggerTool = require(Components.DraggerTool)
 local DraggedPivot = require(Components.DraggedPivot)
 local SelectionDot = require(Components.SelectionDot)
 local MoveHandleView = require(Components.MoveHandleView)
@@ -26,8 +27,8 @@ local DraggerToolModel = require(Implementation.DraggerToolModel)
 
 local Math = require(Utility.Math)
 local Colors = require(Utility.Colors)
-local PartMover = require(Utility.PartMover)
 local JointUtil = require(Utility.JointUtil)
+local PartMover = require(Utility.PartMover)
 local DragHelper = require(Utility.DragHelper)
 local JointMaker = require(Utility.JointMaker)
 local JointPairs = require(Utility.JointPairs)
@@ -85,7 +86,11 @@ export type JointPairs = JointPairs.Class
 export type PartMover = PartMover.Class
 
 return table.freeze({
+    DraggerTool = DraggerTool,
+    DraggerContext = DraggerContext,
+
     Components = table.freeze({
+        DraggerTool = DraggerTool,
         DraggedPivot = DraggedPivot,
         SelectionDot = SelectionDot,
 

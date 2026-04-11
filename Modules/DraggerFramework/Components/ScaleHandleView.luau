@@ -81,6 +81,7 @@ function ScaleHandleView.render(props: Props)
 
 	children.Handle = React.createElement("SphereHandleAdornment", {
 		Adornee = workspace.Terrain,
+		Shading = props.Hovered and Enum.AdornShading.AlwaysOnTop or Enum.AdornShading.Shaded,
 		AlwaysOnTop = props.Hovered,
 		CFrame = cframe,
 		Color3 = color,

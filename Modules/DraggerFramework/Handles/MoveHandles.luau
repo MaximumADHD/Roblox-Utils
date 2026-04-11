@@ -7,6 +7,7 @@ local Shared = DraggerFramework.Parent
 local React = require(Shared.React)
 
 local Colors = require(Utility.Colors)
+local SelectionInfo = require(Utility.SelectionInfo)
 local computeDraggedDistance = require(Utility.computeDraggedDistance)
 
 local Components = DraggerFramework.Components
@@ -29,6 +30,7 @@ type MoveHandleDef = {
 }
 
 type HandleProps = MoveHandleView.Props
+type SelectionInfo = SelectionInfo.Class
 type DraggerContext = DraggerContext.Class
 type DraggerToolModel = DraggerToolModel.Class
 
@@ -89,7 +91,7 @@ type MoveHandles = {
 
 	_schema: any,
 	_selectionWrapper: any,
-	_selectionInfo: any,
+	_selectionInfo: SelectionInfo?,
 	_implementation: Implementation,
 
 	_props: Props,
@@ -99,18 +101,18 @@ type MoveHandles = {
 type Proto = typeof(MoveHandles)
 export type Class = setmetatable<MoveHandles, Proto>
 
-export type Implementation<T = any> = {
-	beginDrag: (self: T, selection: any, selectionInfo: any) -> (),
-	updateDrag: (self: T, delta: CFrame) -> CFrame,
-	endDrag: (self: T) -> any,
-	render: (self: T, currentBoundingBoxCFrame: CFrame) -> React.ReactNode,
-	getSnapPoints: (self: T) -> {CFrame}?,
+export type Implementation = {
+	beginDrag: (self: any, selection: { [number]: Instance }, selectionInfo: any) -> (),
+	updateDrag: (self: any, globalTransform: CFrame) -> CFrame,
+	endDrag: (self: any) -> any?,
+	render: (self: any, handleCFrame: CFrame) -> React.ReactElement<any>,
+	getSnapPoints: (self: any) -> {CFrame}?,
 }
 
 function MoveHandles.new(
 	draggerContext: DraggerContext,
 	props: Props,
-	implementation: Implementation
+	implementation: any
 ): Class
 	local self: MoveHandles = {
 		_handles = {},
@@ -122,6 +124,7 @@ function MoveHandles.new(
 		_draggerContext = draggerContext,
 		_implementation = implementation,
 		_tabKeyDown = false,
+		_selectionInfo = nil,
 
 		_boundingBox = {
 			CFrame = CFrame.identity,
@@ -132,10 +135,10 @@ function MoveHandles.new(
 		_startDistance = 0,
 	}
 
-	return setmetatable(self, MoveHandles)
+	return setmetatable(self, MoveHandles) :: Class
 end
 
-function MoveHandles.update(self: Class, draggerToolModel: DraggerToolModel, selectionInfo)
+function MoveHandles.update(self: Class, draggerToolModel: DraggerToolModel, selectionInfo: SelectionInfo)
 	if not self._draggingHandleId then
 		-- Don't clobber these fields while we're dragging because we're
 		-- updating the bounding box in a smart way given how we're moving the
@@ -155,7 +158,7 @@ function MoveHandles.update(self: Class, draggerToolModel: DraggerToolModel, sel
 end
 
 function MoveHandles._getBasisOffset(self: Class)
-	return self._summonBasisOffset or self._basisOffset
+	return self._summonBasisOffset or self._basisOffset or CFrame.identity
 end
 
 function MoveHandles.shouldBiasTowardsObjects(self: Class)
@@ -164,17 +167,20 @@ end
 
 function MoveHandles.hitTest(self: Class, mouseRay, ignoreExtraThreshold)
 	local closestHandleId, closestHandleDistance = nil, math.huge
+
 	for handleId, handleProps in pairs(self._handles) do
 		local distance = MoveHandleView.hitTest(handleProps, mouseRay)
+
 		if distance and distance < closestHandleDistance then
 			closestHandleDistance = distance
 			closestHandleId = handleId
 		end
 	end
+
 	return closestHandleId, closestHandleDistance, ALWAYS_ON_TOP
 end
 
-function MoveHandles.render(self: Class, hoveredHandleId: string)
+function MoveHandles.render(self: Class, hoveredHandleId: string?)
 	local children = {} :: {
 		[string]: React.Node
 	}
@@ -183,6 +189,7 @@ function MoveHandles.render(self: Class, hoveredHandleId: string)
 		local handleProps = self._handles[self._draggingHandleId]
 
 		children[self._draggingHandleId] = React.createElement<<any>>(MoveHandleView.render, {
+			GuiParent = self._draggerContext:getGuiParent(),
 			Axis = handleProps.Axis,
 			Outset = handleProps.Outset,
 			Color = handleProps.Color,
@@ -194,9 +201,10 @@ function MoveHandles.render(self: Class, hoveredHandleId: string)
 		for otherHandleId, otherHandleProps in pairs(self._handles) do
 			if otherHandleId ~= self._draggingHandleId then
 				children[otherHandleId] = React.createElement<<any>>(MoveHandleView.render, {
+					GuiParent = self._draggerContext:getGuiParent(),
+					Color = otherHandleProps.Color,
 					Axis = otherHandleProps.Axis,
 					Outset = handleProps.Outset,
-					Color = Colors.makeDimmed(otherHandleProps.Color),
 					Scale = otherHandleProps.Scale,
 					AlwaysOnTop = ALWAYS_ON_TOP,
 					Thin = true,
@@ -204,21 +212,20 @@ function MoveHandles.render(self: Class, hoveredHandleId: string)
 			end
 		end
 
-		children.ImplementationRendered =
-			self._implementation:render(self._boundingBox.CFrame * self:_getBasisOffset())
+		children.ImplementationRendered = self._implementation:render(self._boundingBox.CFrame * self:_getBasisOffset())
 	else
 		for handleId, handleProps in pairs(self._handles) do
 			local color = handleProps.Color
 			local hovered = (handleId == hoveredHandleId)
-			if not hovered then
-				color = Colors.makeDimmed(color)
-			end
+			local shading = hovered and Enum.AdornShading.XRay or Enum.AdornShading.XRayShaded
+
 			children[handleId] = React.createElement<<any>>(MoveHandleView.render, {
+				GuiParent = self._draggerContext:getGuiParent(),
 				Axis = handleProps.Axis,
 				Outset = handleProps.Outset,
 				Color = color,
 				Scale = handleProps.Scale,
-				AlwaysOnTop = ALWAYS_ON_TOP,
+				Shading = shading,
 				Hovered = hovered,
 			}) :: React.Node
 		end
@@ -453,9 +460,7 @@ function MoveHandles.mouseDrag(self: Class, mouseRay: Ray)
 	-- applied (because there may be collisions / constraints involved)
 	local axis = self._axis or Vector3.zero
 
-	local actualGlobalTransform =
-		self._implementation:updateDrag(CFrame.new(axis * snappedDelta))
-	
+	local actualGlobalTransform = self._implementation:updateDrag(CFrame.new(axis * snappedDelta))
 	assert(actualGlobalTransform ~= nil, "Did not return a transform from updateDrag.")
 
 	-- Set the new resulting CFrame
@@ -472,27 +477,24 @@ function MoveHandles.mouseUp(self: Class, mouseRay: Ray)
 end
 
 function MoveHandles._updateHandles(self: Class)
-	if self._selectionInfo:isEmpty() then
+	local selectionInfo = self._selectionInfo
+	
+	if selectionInfo and selectionInfo:isEmpty() then
 		self._handles = {}
 	else
 		for handleId, handleDef in pairs(MoveHandleDefinitions) do
 			local bboxCFrame = self._boundingBox.CFrame
 			local handleBaseCFrame = bboxCFrame * self:_getBasisOffset() * handleDef.Offset
-			local hideWhenTempPart = if handleDef.HideWhenTempPart == nil then true else handleDef.HideWhenTempPart
 			
-			if not (hideWhenTempPart) then
-				self._handles[handleId] = {
-					Outset = self._props.Outset,
-					Axis = handleBaseCFrame,
-					Color = handleDef.Color,
-					Scale = self._draggerContext:getHandleScale(handleBaseCFrame.Position),
-					AlwaysOnTop = ALWAYS_ON_TOP,
-					Thin = false,
-					Hovered = false,
-				}
-			else
-				self._handles[handleId] = nil
-			end
+			self._handles[handleId] = {
+				Outset = self._props.Outset,
+				Axis = handleBaseCFrame,
+				Color = handleDef.Color,
+				Scale = self._draggerContext:getHandleScale(handleBaseCFrame.Position),
+				AlwaysOnTop = ALWAYS_ON_TOP,
+				Thin = false,
+				Hovered = false,
+			}
 		end
 	end
 end

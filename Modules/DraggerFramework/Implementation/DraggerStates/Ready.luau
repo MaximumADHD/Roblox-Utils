@@ -51,6 +51,16 @@ function Ready.leave(self: Class)
 	self._hoverTracker:clearHover(self._draggerToolModel._draggerContext)
 end
 
+function Ready.update(self: Class)
+	local hoverSelectable = self._hoverTracker:getHoverSelectable()
+	
+	if hoverSelectable or self._hoverTracker:getHoverHandleId() then
+		self._draggerToolModel:setMouseCursor(StandardCursor.getOpenHand())
+	else
+		self._draggerToolModel:setMouseCursor(StandardCursor.getArrow())
+	end
+end
+
 function Ready.render(self: Class)
 	local elements = {} :: {
 		[string]: React.Node,
@@ -89,12 +99,6 @@ function Ready.render(self: Class)
 		end
 	end
 
-	if hoverSelectable or self._hoverTracker:getHoverHandleId() then
-		self._draggerToolModel:setMouseCursor(StandardCursor.getOpenHand())
-	else
-		self._draggerToolModel:setMouseCursor(StandardCursor.getArrow())
-	end
-
 	if self._draggerToolModel:shouldShowLocalSpaceIndicator() then
 		local selectionInfo = self._draggerToolModel._selectionInfo
 		if not selectionInfo:isEmpty() and draggerContext:shouldUseLocalSpace() then
@@ -109,10 +113,10 @@ function Ready.render(self: Class)
 		end
 	end
 
-	local hoverHandles, hoverHandleId = self._hoverTracker:getHoverHandleId()
+	local _, hoverHandleId = self._hoverTracker:getHoverHandleId()
+
 	for i, handles in pairs(self._draggerToolModel:getHandlesList()) do
-		elements["ImplementationUI" .. i] =
-			handles:render(hoverHandles == handles and hoverHandleId or nil)
+		elements["ImplementationUI" .. i] = handles:render(hoverHandleId)
 	end
 
 	return React.createElement(React.Fragment, {}, elements)
@@ -161,6 +165,12 @@ function Ready._scopeSelectChanged(self: Class)
 	if self._hoverTracker:getHoverItem() ~= nil then
 		self:_updateHoverTracker()
 		self._draggerToolModel:_scheduleRender()
+	end
+end
+
+function Ready.processKeyDown(self: Class, keyCode: Enum.KeyCode)
+	if keyCode == Enum.KeyCode.LeftAlt or keyCode == Enum.KeyCode.RightAlt then
+		self:_scopeSelectChanged()
 	end
 end
 

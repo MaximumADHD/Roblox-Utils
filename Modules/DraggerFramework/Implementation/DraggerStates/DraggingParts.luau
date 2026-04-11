@@ -34,6 +34,7 @@ function DraggingParts.new(draggerToolModel: DraggerToolModel, dragInfo: any): C
 end
 
 function DraggingParts.enter(self: Class)
+	self._draggerToolModel:setMouseCursor(StandardCursor.getClosedHand())
 	self:_updateFreeformSelectionDrag()
 end
 
@@ -57,7 +58,6 @@ function DraggingParts._initIgnoreList(self: Class, parts: { BasePart })
 end
 
 function DraggingParts.render(self: Class)
-	self._draggerToolModel:setMouseCursor(StandardCursor.getClosedHand())
 	return self._freeformDragger:render()
 end
 

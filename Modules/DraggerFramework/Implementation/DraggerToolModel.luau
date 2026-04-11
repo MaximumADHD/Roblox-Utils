@@ -74,6 +74,7 @@ export type DraggerState<T = any, Args... = ...any> = {
 	processMouseDown: (self: T, isDoubleClick: boolean) -> (),
 	processMouseUp: (self: T) -> (),
 	processViewChanged: (self: T) -> (),
+	update: ((self: T) -> ())?,
 }
 
 -- Table of hot-loaded state modules.
@@ -106,7 +107,7 @@ local DOUBLE_CLICK_TIME = 0.5
 
 -- Note: ShowSelectionDot remove because we don't use it anymore
 -- Note: UseCollisionsTransparency is part of the Schema now
-type DraggerSettings = {
+export type DraggerSettings = {
 	AllowDragSelect: boolean?,
 	AllowFreeformDrag: boolean?,
 	ShowLocalSpaceIndicator: boolean?,
@@ -127,9 +128,9 @@ local DEFAULT_DRAGGER_SETTINGS: DraggerSettings = {
 }
 
 type DraggerHandle<T = any> = {
-	update: (self: T, draggerToolModel: Class, selectionInfo: any) -> (),
-	mouseDown: (self: T, mouseRay: Ray, handleId: any) -> (),
-	render: (self: T, handleId: any) -> any,
+	update: (self: T, draggerToolModel: Class, selectionInfo: SelectionInfo) -> (),
+	mouseDown: (self: T, mouseRay: Ray, handleId: string) -> (),
+	render: (self: T, hoverHandleId: string?) -> React.Node?,
 	keyUp: ((self: T, keyCode: Enum.KeyCode) -> boolean?)?,
 	keyDown: ((self: T, keyCode: Enum.KeyCode) -> boolean?)?,
 }
@@ -200,8 +201,9 @@ function DraggerToolModel.transitionToState(self: Class, draggerStateType: Dragg
 	self._mainState = draggerStateType
 
 	if newState then
-		self._stateObject = newState
-		newState:enter()
+		local new = newState.new(self, ...)
+		self._stateObject = new
+		new:enter()
 	end
 
 	self:_updatePivotIndicatorVisibility()
@@ -221,6 +223,12 @@ end
 
 -- Called every frame on render step
 function DraggerToolModel.update(self: Class)
+	local stateObject = self._stateObject
+
+	if stateObject and stateObject.update then
+		stateObject:update()
+	end
+
 	if self._draggerContext:isSimulating() then
 		-- Must do a view update every frame in run mode to catch stuff
 		-- moving under our mouse.
@@ -364,8 +372,8 @@ function DraggerToolModel._processSelected(self: Class)
 
 	self:_updateSelectionInfo()
 	
-	if readyState then
-		readyState:enter()
+	if self._stateObject then
+		self._stateObject:enter()
 	end
 
 	self._debugInProcessSelected = false

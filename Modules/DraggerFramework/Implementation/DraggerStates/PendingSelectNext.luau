@@ -35,13 +35,13 @@ function PendingSelectNext.new(draggerToolModel: DraggerToolModel, isDoubleClick
 end
 
 function PendingSelectNext.enter(self: Class)
+	self._draggerToolModel:setMouseCursor(StandardCursor.getOpenHand())
 end
 
 function PendingSelectNext.leave(self: Class)
 end
 
 function PendingSelectNext.render(self: Class)
-	self._draggerToolModel:setMouseCursor(StandardCursor.getOpenHand())
 end
 
 function PendingSelectNext.processSelectionChanged(self: Class)

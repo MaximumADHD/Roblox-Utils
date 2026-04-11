@@ -9,15 +9,15 @@
 local UserInputService = game:GetService("UserInputService")
 
 local gotStudioService, StudioService = pcall(function ()
-	return game:GetService("StudioService")
+	return assert(game:GetService("StudioService"))
 end)
 
 local gotChangeHistoryService, ChangeHistoryService = pcall(function()
-	return game:GetService("ChangeHistoryService")
+	return assert(game:GetService("ChangeHistoryService"))
 end)
 
 local gotDraggerService, DraggerService = pcall(function()
-	return game:GetService("DraggerService")
+	return assert(game:GetService("DraggerService"))
 end)
 
 local DraggerFramework = script.Parent.Parent
@@ -35,9 +35,27 @@ const RAYCAST_DIRECTION_SCALE = 10000
 const HANDLE_SCALE_FACTOR = 0.05
 const MAX_UNDO_WAYPOINTS = 20
 
+export type ConnectionLike = {
+	Disconnect: <T>(self: T) -> (),
+}
+
+export type SignalLike<Args...> = {
+	Connect: (self: any, handler: (Args...) -> ()) -> ConnectionLike,
+}
+
+export type SelectionLike = {
+	Get: (self: any) -> { Instance },
+	Set: (self: any, selection: { Instance }) -> (),
+	SelectionChanged: SignalLike<{ Instance }>,
+}
+
+export type ISelection = 
+	| SelectionLike
+	| Selection
+
 export type Config = {
 	GuiTarget: BasePlayerGui,
-	Selection: Instance,
+	Selection: ISelection,
 	Mouse: Mouse,
 
     ShowHoverOver: boolean?,
@@ -55,7 +73,7 @@ export type Config = {
 	Camera: Camera?,
 }
 
-type Gizmo = 
+export type Gizmo = 
 	| Attachment
 	| Constraint
 	| NoCollisionConstraint
@@ -63,7 +81,7 @@ type Gizmo =
 
 type DraggerContext = {
     _guiTarget: BasePlayerGui,
-    _selection: Instance,
+    _selection: ISelection,
     _camera: Camera,
     _mouse: Mouse?,
 
@@ -242,7 +260,7 @@ function DraggerContext.getHoverBoxColor(self: Class, isActive: boolean)
 end
 
 function DraggerContext.getHoverLineThickness(self: Class)
-	return self._config.HoverLineThickness or 2
+	return self._config.HoverLineThickness or 0.04
 end
 
 function DraggerContext.getSelectionBoxColor(self: Class, isActive: boolean?)
@@ -281,11 +299,7 @@ function DraggerContext.getMouseRay(self: Class): Ray
 end
 
 function DraggerContext.getMouseLocation(self: Class)
-	if self._mouse then
-		return Vector2.new(self._mouse.X, self._mouse.Y)
-	else
-		return UserInputService:GetMouseLocation()
-	end
+	return UserInputService:GetMouseLocation()
 end
 
 function DraggerContext.viewportPointToRay(self: Class, mouseLocation: Vector2)
@@ -316,7 +330,7 @@ function DraggerContext.expectMouseIcon(self: Class, icon: string)
 	end
 end
 
-function DraggerContext.getSelection(self: Class)
+function DraggerContext.getSelection(self: Class): SelectionLike
 	return self._selection
 end
 
@@ -408,7 +422,9 @@ end
 
 function DraggerContext.addUndoWaypoint(self: Class, waypointIdentifier: string, waypointText: string)
 	if gotChangeHistoryService then
-		ChangeHistoryService:SetWaypoint(waypointIdentifier)
+		pcall(function ()
+			ChangeHistoryService:SetWaypoint(waypointIdentifier)
+		end)
 	end
 
 	table.insert(self._undoWaypoints, waypointIdentifier)
@@ -432,7 +448,9 @@ function DraggerContext.expectAndUndo(self: Class, waypointIdentifier: string)
 	self._undoWaypoints[#self._undoWaypoints] = nil
 
 	if gotChangeHistoryService then
-		ChangeHistoryService:Undo()
+		pcall(function ()
+			ChangeHistoryService:Undo()
+		end)
 	end
 end
 

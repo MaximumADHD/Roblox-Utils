@@ -9,7 +9,8 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 
-local DraggerFramework = script.Parent
+local Components = script.Parent
+local DraggerFramework = Components.Parent
 local Packages = DraggerFramework.Parent
 local React = require(Packages.React)
 
@@ -19,73 +20,59 @@ local DraggerToolModel = require(Implementation.DraggerToolModel)
 
 -- Utilities
 local Utility = DraggerFramework.Utility
-local ViewChangeDetector = require(Utility.ViewChangeDetector)
 local shouldDragAsFace = require(Utility.shouldDragAsFace)
+local ViewChangeDetector = require(Utility.ViewChangeDetector)
 
 -- Constants
 local DRAGGER_UPDATE_BIND_NAME = "DraggerToolViewUpdate"
+type DraggerSettings = DraggerToolModel.DraggerSettings
+type DraggerToolModel = DraggerToolModel.Class
 
 export type Props = {
 	DraggerContext: DraggerContext.Class,
+	DraggerSettings: DraggerSettings,
 	DraggerSchema: any,
-	DraggerSettings: any,
-	Mouse: PluginMouse,
+
+	Mouse: Mouse,
 	InitialMouseDown: boolean?,
 }
 
 local function DraggerToolComponent(props: Props)
-	local redraw, setRedraw = React.useState(0)
-	local viewBoundsAreDirty, setViewBoundsAreDirty = React.useState(false)
-	local selectionBoundsAreDirty, setSelectionBoundsAreDirty = React.useState(false)
+	local viewBoundsAreDirty = React.useRef(false)
+	local selectionBoundsAreDirty = React.useRef(false)
+	local draggerToolModelRef = React.useRef(nil :: DraggerToolModel?)
+	local renderNode, setRenderNode = React.useState(nil :: React.Node?)
 	
 	local requestRedraw = React.useMemo(function ()
 		return function()
-			setRedraw(function(t: number)
-				return t + 1
-			end)
+			local draggerToolModel = draggerToolModelRef.current
+
+			if draggerToolModel then
+				local render = draggerToolModel:render()
+				setRenderNode(render)
+			end
 		end
 	end, {})
 
-	local draggerToolModel = React.useMemo(function ()
-		assert(props.DraggerSchema)
-		assert(props.DraggerContext)
-		assert(props.DraggerSettings)
-
-		return DraggerToolModel.new(
-			props.DraggerContext,
-			props.DraggerSchema,
-			props.DraggerSettings,
-			requestRedraw,
-			function() setViewBoundsAreDirty(true) end,
-			function() setSelectionBoundsAreDirty(true) end
-		)
-	end, {
-		props.DraggerContext,
-		props.DraggerSchema,
-		props.DraggerSettings,
-		redraw,
-	})
-	
 	React.useEffect(function ()
-		local isMounted = true
-		local bindName = DRAGGER_UPDATE_BIND_NAME .. HttpService:GenerateGUID(false)
-
-		local function requestRender()
-			if isMounted then
-				setRedraw(function(t: number)
-					return t + 1
-				end)
-			end
-		end
-
 		local draggerToolModel = DraggerToolModel.new(
 			props.DraggerContext,
 			props.DraggerSchema,
 			props.DraggerSettings,
-			requestRender,
-			function() viewBoundsAreDirty = true end,
-			function() selectionBoundsAreDirty = true end
+			requestRedraw,
+			function() viewBoundsAreDirty.current = true end,
+			function() selectionBoundsAreDirty.current = true end
 		)
+
+		draggerToolModelRef.current = draggerToolModel
+
+		if props.InitialMouseDown then
+			task.defer(function()
+				if draggerToolModel then
+					draggerToolModel:_processMouseDown()
+				end
+			end)
+		end
 
 		-- Select it first before we potentially start feeding input to it
 		draggerToolModel:_processSelected()
@@ -93,56 +80,87 @@ local function DraggerToolComponent(props: Props)
 		-- Trigger a render now that the model exists
 		draggerToolModel:render()
 
-		-- This should never return true because we disconnect connections before
-		-- tearing down our state.
-		local function bailed(_reason)
-			return not isMounted
+		return function()
+			draggerToolModel:_processDeselected()
 		end
+	end, {
+		props.DraggerSchema,
+		props.DraggerContext,
+		props.DraggerSettings,
+	})
 
+	React.useEffect(function ()
+	end) 
+
+	-- Input wiring and render loop
+	React.useEffect(function ()
 		local mouse = props.Mouse
+		local bindName = DRAGGER_UPDATE_BIND_NAME .. HttpService:GenerateGUID(false)
 
 		local mouseDownConn = mouse.Button1Down:Connect(function()
-			if bailed("Button1Down") then return end
-			draggerToolModel:_processMouseDown()
+			local draggerToolModel = draggerToolModelRef.current
+			
+			if draggerToolModel then
+				draggerToolModel:_processMouseDown()
+			end
 		end)
 
 		local mouseUpConn = mouse.Button1Up:Connect(function()
-			if bailed("Button1Up") then return end
-			draggerToolModel:_processMouseUp()
+			local draggerToolModel = draggerToolModelRef.current
+
+			if draggerToolModel then
+				draggerToolModel:_processMouseUp()
+			end
 		end)
 
 		local keyDownConn = UserInputService.InputBegan:Connect(function(input, _gameProcessed)
-			if bailed("KeyDown") then return end
 			if input.UserInputType == Enum.UserInputType.Keyboard then
-				draggerToolModel:_processKeyDown(input.KeyCode)
+				local draggerToolModel = draggerToolModelRef.current
+
+				if draggerToolModel then
+					draggerToolModel:_processKeyDown(input.KeyCode)
+				end
 			end
 		end)
 
 		local keyUpConn = UserInputService.InputEnded:Connect(function(input, _gameProcessed)
-			if bailed("KeyUp") then return end
 			if input.UserInputType == Enum.UserInputType.Keyboard then
-				draggerToolModel:_processKeyUp(input.KeyCode)
-			end
-		end)
+				local draggerToolModel = draggerToolModelRef.current
 
-		local dragEnterConn = mouse.DragEnter:Connect(function(instances)
-			if bailed("DragEnter") then return end
-			if #instances > 0 then
-				if #instances == 1 and shouldDragAsFace(instances[1]) then
-					draggerToolModel:_processToolboxInitiatedFaceDrag(instances)
-				else
-					draggerToolModel:_processToolboxInitiatedFreeformSelectionDrag()
+				if draggerToolModel then
+					draggerToolModel:_processKeyUp(input.KeyCode)
 				end
 			end
 		end)
+
+		local dragEnterConn: RBXScriptConnection?
+
+		if mouse:IsA("PluginMouse") then
+			dragEnterConn = mouse.DragEnter:Connect(function(instances)
+				local draggerToolModel = draggerToolModelRef.current
+
+				if #instances > 0 and draggerToolModel then
+					if #instances == 1 and shouldDragAsFace(instances[1]) then
+						draggerToolModel:_processToolboxInitiatedFaceDrag(instances)
+					else
+						draggerToolModel:_processToolboxInitiatedFreeformSelectionDrag()
+					end
+				end
+			end)
+		end
 
 		local viewChange = ViewChangeDetector.new(mouse)
 		local lastUseLocalSpace = props.DraggerContext:shouldUseLocalSpace()
 
 		RunService:BindToRenderStep(bindName, Enum.RenderPriority.First.Value, function()
-			if not isMounted then return end
-			draggerToolModel:update()
+			local draggerToolModel = draggerToolModelRef.current
 
+			if draggerToolModel then
+				draggerToolModel:update()
+			else
+				return
+			end
+			
 			local shouldUpdateView = false
 			local shouldUpdateSelection = false
 
@@ -150,12 +168,13 @@ local function DraggerToolComponent(props: Props)
 				shouldUpdateView = true
 			end
 
-			if selectionBoundsAreDirty then
-				selectionBoundsAreDirty = false
+			if selectionBoundsAreDirty.current then
+				selectionBoundsAreDirty.current = false
 				shouldUpdateSelection = true
 			end
-			if viewBoundsAreDirty then
-				viewBoundsAreDirty = false
+
+			if viewBoundsAreDirty.current then
+				viewBoundsAreDirty.current = false
 				shouldUpdateView = true
 			end
 
@@ -178,38 +197,27 @@ local function DraggerToolComponent(props: Props)
 			lastUseLocalSpace = currentUseLocalSpace
 		end)
 
-		if props.InitialMouseDown then
-			task.defer(function()
-				if isMounted then
-					draggerToolModel:_processMouseDown()
-				end
-			end)
-		end
-
 		return function()
-			isMounted = false
-
+			local draggerToolModel = draggerToolModelRef.current
 			mouseDownConn:Disconnect()
 			mouseUpConn:Disconnect()
 			keyDownConn:Disconnect()
 			keyUpConn:Disconnect()
+			
+			if dragEnterConn then
+				dragEnterConn:Disconnect()
+			end
 
-			dragEnterConn:Disconnect()
 			RunService:UnbindFromRenderStep(bindName)
 
 			-- Deselect after we stop potentially sending events
-			draggerToolModel:_processDeselected()
+			if draggerToolModel then
+				draggerToolModel:_processDeselected()
+			end
 		end
-	end, {
-		props.Mouse,
-		props.DraggerSchema,
-		props.DraggerContext,
-		props.DraggerSettings,
-		props.InitialMouseDown,
-		draggerToolModel,
-	} :: {any})
+	end, { props.Mouse })
 
-	return nil
+	return renderNode
 end
 
 return DraggerToolComponent

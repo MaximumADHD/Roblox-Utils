@@ -1,7 +1,4 @@
 
-local Workspace = game:GetService("Workspace")
-local CoreGui = game:GetService("CoreGui")
-
 local DraggerFramework = script.Parent.Parent
 local Shared = DraggerFramework.Parent
 local Math = require(DraggerFramework.Utility.Math)
@@ -19,7 +16,6 @@ local BASE_TIP_OFFSET = 0.20
 local BASE_TIP_LENGTH = 0.25
 local TIP_RADIUS_MULTIPLIER = 3
 local SCREENSPACE_HANDLE_SIZE = 6
-local HANDLE_DIM_TRANSPARENCY = 0.45
 local HANDLE_THIN_BY_FRAC = 0.34
 local HANDLE_THICK_BY_FRAC = 1.5
 
@@ -28,9 +24,11 @@ export type Props = {
 	Color: Color3,
 	Scale: number,
 	Outset: number?,
-	Hovered: boolean,
-	Thin: boolean,
-	AlwaysOnTop: boolean,
+	Hovered: boolean?,
+	Thin: boolean?,
+	AlwaysOnTop: boolean?,
+	Shading: Enum.AdornShading?,
+	GuiParent: BasePlayerGui?,
 }
 
 local MoveHandleView = {}
@@ -56,64 +54,44 @@ function MoveHandleView.render(props: Props)
 		tipLength = tipLength * HANDLE_THICK_BY_FRAC
 	end
 
+	local shading = props.Shading or Enum.AdornShading.Default
+
+	if props.Shading then
+		shading = props.Shading
+	elseif props.AlwaysOnTop then
+		shading = Enum.AdornShading.XRayShaded
+	end
+
 	local coneAtCFrame = props.Axis * CFrame.new(0, 0, -(offset + length))
 	local tipAt = coneAtCFrame * Vector3.new(0, 0, -tipOffset)
 	local tipAtScreen = workspace.CurrentCamera:WorldToScreenPoint(tipAt)
 	local children = {}
 
-	if not props.Hovered then
-		children.Shaft = React.createElement("CylinderHandleAdornment", {
-			Adornee = workspace.Terrain, -- Just a neutral anchor point
+	children.Shaft = React.createElement("CylinderHandleAdornment", {
+		Adornee = workspace.Terrain, -- Just a neutral anchor point
+		ZIndex = 0,
+		Radius = radius,
+		Height = length,
+		CFrame = props.Axis * CFrame.new(0, 0, -(offset + length * 0.5)),
+		Color3 = props.Color,
+		Shading = shading,
+		AdornCullingMode = CULLING_MODE,
+	})
+
+	if not props.Thin then
+		children.Head = React.createElement("ConeHandleAdornment", {
+			Adornee = workspace.Terrain,
 			ZIndex = 0,
-			Radius = radius,
-			Height = length,
-			CFrame = props.Axis * CFrame.new(0, 0, -(offset + length * 0.5)),
+			Radius = TIP_RADIUS_MULTIPLIER * radius,
+			Height = tipLength,
+			CFrame = coneAtCFrame,
 			Color3 = props.Color,
-			AlwaysOnTop = false,
+			Shading = shading,
 			AdornCullingMode = CULLING_MODE,
 		})
-
-		if not props.Thin then
-			children.Head = React.createElement("ConeHandleAdornment", {
-				Adornee = workspace.Terrain,
-				ZIndex = 0,
-				Radius = TIP_RADIUS_MULTIPLIER * radius,
-				Height = tipLength,
-				CFrame = coneAtCFrame,
-				Color3 = props.Color,
-				AlwaysOnTop = false,
-				AdornCullingMode = CULLING_MODE,
-			})
-		end
 	end
 
-	if props.AlwaysOnTop then
-		children.DimmedShaft = React.createElement("CylinderHandleAdornment", {
-			Adornee = workspace.Terrain, -- Just a neutral anchor point
-			ZIndex = 0,
-			Radius = radius,
-			Height = length,
-			CFrame = props.Axis * CFrame.new(0, 0, -(offset + length * 0.5)),
-			Color3 = props.Color,
-			AlwaysOnTop = true,
-			Transparency = props.Hovered and 0.0 or HANDLE_DIM_TRANSPARENCY,
-			AdornCullingMode = CULLING_MODE,
-		})
-
-		if not props.Thin then
-			children.DimmedHead = React.createElement("ConeHandleAdornment", {
-				Adornee = workspace.Terrain,
-				ZIndex = 0,
-				Radius = 3 * radius,
-				Height = tipLength,
-				CFrame = coneAtCFrame,
-				Color3 = props.Color,
-				AlwaysOnTop = true,
-				Transparency = props.Hovered and 0.0 or HANDLE_DIM_TRANSPARENCY,
-				AdornCullingMode = CULLING_MODE,
-			})
-		end
-	elseif not props.Thin then
+	if not props.Thin and props.GuiParent then
 		local halfHandleSize = 0.5 * SCREENSPACE_HANDLE_SIZE
 
 		children.ScreenBox = ReactRoblox.createPortal({
@@ -123,10 +101,9 @@ function MoveHandleView.render(props: Props)
 					BackgroundColor3 = props.Color,
 					Position = UDim2.new(0, tipAtScreen.X - halfHandleSize, 0, tipAtScreen.Y - halfHandleSize),
 					Size = UDim2.new(0, SCREENSPACE_HANDLE_SIZE, 0, SCREENSPACE_HANDLE_SIZE),
-					AdornCullingMode = CULLING_MODE,
 				})
 			})
-		}, CoreGui)
+		}, props.GuiParent)
 	end
 
 	return React.createElement("Folder", {}, children)
@@ -149,8 +126,8 @@ function MoveHandleView.hitTest(props: Props, mouseRay: Ray): number?
 	if not props.AlwaysOnTop then
 		-- Check the always on top 2D element at the tip of the vector
 		local tipAt = props.Axis * Vector3.new(0, 0, -(offset + length + tipOffset))
-		local tipAtScreen, _ = Workspace.CurrentCamera:WorldToScreenPoint(tipAt)
-		local mouseAtScreen = Workspace.CurrentCamera:WorldToScreenPoint(mouseRay.Origin)
+		local tipAtScreen, _ = workspace.CurrentCamera:WorldToScreenPoint(tipAt)
+		local mouseAtScreen = workspace.CurrentCamera:WorldToScreenPoint(mouseRay.Origin)
 		local halfHandleSize = 0.5 * SCREENSPACE_HANDLE_SIZE
 
 		if mouseAtScreen.X > tipAtScreen.X - halfHandleSize and

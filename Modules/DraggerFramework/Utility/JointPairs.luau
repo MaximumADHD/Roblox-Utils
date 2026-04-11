@@ -466,6 +466,7 @@ function JointPairs.renderJoints(self: Class, scale: number)
 				Color3 = JointTypeToColor[joint.ClassName],
 				Radius = 0.05 + 0.05 * scale,
 				Height = edgeLength,
+				Shading = Enum.AdornShading.XRay,
 				Adornee = workspace.Terrain
 			})
 		end

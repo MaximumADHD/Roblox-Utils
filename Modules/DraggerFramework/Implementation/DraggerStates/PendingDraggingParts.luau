@@ -29,7 +29,7 @@ function PendingDraggingParts.new(draggerToolModel: DraggerToolModel, isDoubleCl
 end
 
 function PendingDraggingParts.enter(self: Class)
-
+	self._draggerToolModel:setMouseCursor(StandardCursor.getClosedHand())
 end
 
 function PendingDraggingParts.leave(self: Class)
@@ -37,7 +37,6 @@ function PendingDraggingParts.leave(self: Class)
 end
 
 function PendingDraggingParts.render(self: Class)
-	self._draggerToolModel:setMouseCursor(StandardCursor.getClosedHand())
 end
 
 function PendingDraggingParts.processSelectionChanged(self: Class)

@@ -27,7 +27,7 @@ local function StandaloneSelectionBox(props: Props)
 	local dummyPartOffset = props.Size / 2 - dummyPartSize / 2
 	
 	local container = props.Container or game:GetService("CoreGui")
-	local dummyPartRef = React.useRef(nil :: Part?)
+	local dummyPartRef = React.useRef(nil :: Model?)
 	
 	return ReactRoblox.createPortal({
 		DummyModel = React.createElement("Model", {

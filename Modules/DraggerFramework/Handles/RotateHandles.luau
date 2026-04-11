@@ -50,11 +50,11 @@ type HandleProps = RotateHandleView.Props
 type DraggerContext = DraggerContext.Class
 type DraggerToolModel = DraggerToolModel.Class
 
-export type Implementation<T = any> = {
-	beginDrag: (self: T, selection: { [number]: Instance }, selectionInfo: any) -> (),
-	updateDrag: (self: T, globalTransform: CFrame) -> CFrame,
-	endDrag: (self: T) -> any?,
-	render: (self: T, handleCFrame: CFrame) -> React.ReactElement<any>,
+export type Implementation = {
+	beginDrag: <T>(self: T, selection: { [number]: Instance }, selectionInfo: any) -> (),
+	updateDrag: <T>(self: T, globalTransform: CFrame) -> CFrame,
+	endDrag: <T>(self: T) -> any?,
+	render: <T>(self: T, handleCFrame: CFrame) -> React.ReactElement<any>,
 }
 
 type RotateHandles = {
@@ -183,7 +183,7 @@ local function snapToRotateIncrementIfNeeded(angle: number, rotateIncrement: num
 	end
 end
 
-function RotateHandles.new(draggerContext: DraggerContext, props: Props?, implementation: Implementation): Class
+function RotateHandles.new(draggerContext: DraggerContext, props: Props?, implementation: any): Class
 	local self = {}
 
 	self._draggerContext = draggerContext
@@ -230,6 +230,7 @@ function RotateHandles.hitTest(self: Class, mouseRay: Ray, ignoreExtraThreshold:
 
 	for handleId, handleProps in pairs(self._handles) do
 		local distance = RotateHandleView.hitTest(handleProps, mouseRay)
+		
 		if distance and distance < closestHandleDistance then
 			closestHandleDistance = distance
 			closestHandleId = handleId
@@ -258,6 +259,7 @@ function RotateHandles.render(self: Class, hoveredHandleId: string?)
 		children[self._draggingHandleId] = React.createElement<<any>>(RotateHandleView.render, {
 			HandleCFrame = handleProps.HandleCFrame,
 			Color = handleProps.Color,
+			Shading = Enum.AdornShading.XRay,
 			StartAngle = self._startAngle - self._draggingLastGoodDelta,
 			EndAngle = self._startAngle,
 			Scale = self._scale,
@@ -273,7 +275,7 @@ function RotateHandles.render(self: Class, hoveredHandleId: string?)
 
 				children[handleId] = React.createElement<<any>>(RotateHandleView.render, {
 					HandleCFrame = self._boundingBox.CFrame * offset,
-					Color = Colors.makeDimmed(otherHandleProps.Color),
+					Shading = Enum.AdornShading.XRayShaded,
 					Scale = self._scale,
 					Thin = true,
 					RadiusOffset = handleProps.RadiusOffset,
@@ -284,23 +286,17 @@ function RotateHandles.render(self: Class, hoveredHandleId: string?)
 		children.ImplementationRendered = self._implementation:render(self._boundingBox.CFrame * self._basisOffset)
 	else
 		for handleId, handleProps in pairs(self._handles) do
-			local color = handleProps.Color
 			local hovered = (handleId == hoveredHandleId)
-			local tickAngleToUse
-
-			if hovered then
-				tickAngleToUse = tickAngle
-			else
-				color = Colors.makeDimmed(color)
-			end
-
+			local shading = hovered and Enum.AdornShading.XRay or Enum.AdornShading.XRayShaded
+			
 			children[handleId] = React.createElement<<any>>(RotateHandleView.render, {
 				HandleCFrame = handleProps.HandleCFrame,
-				Color = color,
+				Color = handleProps.Color,
 				Scale = self._scale,
 				Hovered = hovered,
 				RadiusOffset = handleProps.RadiusOffset,
-				TickAngle = tickAngleToUse,
+				Shading = shading,
+				TickAngle = hovered and tickAngle,
 			})
 		end
 	end

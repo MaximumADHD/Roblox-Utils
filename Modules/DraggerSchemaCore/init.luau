@@ -6,13 +6,13 @@
 	parts and attachments.
 ]]
 
-local Selection = require(script.Selection)
 local TransformHandlesImplementation = require(script.TransformHandlesImplementation)
 local ExtrudeHandlesImplementation = require(script.ExtrudeHandlesImplementation)
 local BoundsChangedTracker = require(script.BoundsChangedTracker)
 local HoverEscapeDetector = require(script.HoverEscapeDetector)
 local FreeformDragger = require(script.FreeformDragger)
 local SelectionInfo = require(script.SelectionInfo)
+local Selection = require(script.Selection)
 
 local getSelectionBoxComponent = require(script.getSelectionBoxComponent)
 local isExclusiveSelectable = require(script.isExclusiveSelectable)
@@ -168,6 +168,35 @@ local DraggerSchema = {
 	-- :uninstall()
 	--     Stop tracking bounds changes on the target parts
 	BoundsChangedTracker = BoundsChangedTracker,
+
+	-- class SelectionInfo
+	-- Exposes derived aggregate information about the selection.
+	-- It is returned as an object so that some of the information can be lazily
+	-- calculated if desired.
+	-- The returned SelectionInfo can contain whatever fields and methods you
+	-- need depending on your tool implementations, however, the following are
+	-- are required for the DraggerFramework code:
+	-- SelectionInfo
+	-- .new(draggerContext, selection)
+	--     Construct a SelectionInfo for a given selection of selectables.
+	-- :isEmpty()
+	--     Returns true when there were no items in the selection to calculate
+	--     a well formed SelectionInfo from. When this returns true, the other
+	--     functions on SelectionInfo will not be called by the framework.
+	-- :getBoundingBox() -> (CFrame at, Vector3 offset, Vector3 size)
+	--     Returns the primary "basis" of the selection which the bounding box
+	--     is oriented around in `at`, as well as the offset of the center of
+	--     the bounding box from that basis, and the size of the bounding box.
+	--     Supporting "Use Local Space" means changing the return value of this
+	--     method depending on whether the option is set.
+	-- :doesContainItem(item)
+	--     Returns whether a given item is part of the selection or not.
+	-- :isDynamic()
+	--     For optimization purposes, do fields of the SelectionInfo change
+	--     every single frame? If this is hardcoded to true then you don't need
+	--     to implement BoundsChangedTracker, as the bounds are assumed to be
+	--     changing every frame... at the cost of significantly worse perf.
+	SelectionInfo = SelectionInfo,
 
 	-- function addUndoWaypoint(draggerContext, waypointName)
 	-- Add an undo waypoint. A simple implementation would be to simply delegate

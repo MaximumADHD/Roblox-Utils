@@ -38,19 +38,28 @@ export type Class = setmetatable<{
 	_installed: boolean,
 	_partToEntry: { [BasePart]: Entry },
 	_attachmentToEntry: { [Attachment]: Entry },
-	_basisObject: PVInstance?,
+	_basisObject: (PVInstance | Attachment)?,
 	_basisPivotChangedSignal: RBXScriptSignal?,
 	_basisPivotChangedConnection: RBXScriptConnection?,
 	_basisPivotChangedTrampoline: () -> (),
 }, typeof(BoundsChangedTracker)>
 
 function BoundsChangedTracker.new(draggerContext: DraggerContext, handler: (PVInstance | Attachment) -> ()): Class
-	return setmetatable({
+	local self = setmetatable({
 		_handler = handler,
 		_installed = false,
 		_partToEntry = {},
 		_attachmentToEntry = {},
-	}, BoundsChangedTracker) :: Class
+		_basisObject = nil :: (PVInstance | Attachment)?,
+	}, BoundsChangedTracker)
+
+	self._basisPivotChangedTrampoline = function()
+		if self._basisObject then
+			handler(self._basisObject)
+		end
+	end
+
+	return self :: Class
 end
 
 local function hookUpConnections(entry: Entry)

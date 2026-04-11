@@ -41,6 +41,10 @@ function BoundingBox.fromObjects(objects: { Instance }, maybeBasisCFrame: CFrame
 	local max = -Vector3.one * math.huge
 	local min = Vector3.one * math.huge
 
+	if #objects == 0 then
+		return Vector3.zero, Vector3.zero
+	end
+
 	for _, object in ipairs(objects) do
 		if object:IsA("PVInstance") and object ~= terrain then
 			local cframe = CFrame.identity
@@ -120,6 +124,10 @@ function BoundingBox.fromObjectsComputeAll(objects: { Instance }, maybeBasisCFra
 		end
 	end
 
+	if not next(boundingBoxes) then
+		return Vector3.zero, Vector3.zero, boundingBoxes
+	end
+
 	local offset = 0.5 * (min + max)
 	local size = max - min
 
@@ -131,6 +139,10 @@ end
 	in the supplied basis.
 ]]
 function BoundingBox.fromPartsAndAttachments(parts: { BasePart }, attachments: { Attachment }, maybeBasisCFrame: CFrame?)
+	if #parts == 0 and #attachments == 0 then
+		return Vector3.zero, Vector3.zero
+	end
+
 	local basisCFrame = maybeBasisCFrame or CFrame.identity
 	local inverseBasis = basisCFrame:Inverse()
 	local terrain = workspace.Terrain
@@ -163,10 +175,14 @@ end
 	bounding box for a set of parts and attachments as fast as possible.
 ]]
 function BoundingBox.computeTwoBoundingBoxes(parts: { BasePart }, attachments: { Attachment }, maybeBasisCFrame: CFrame?)
+	if #parts == 0 and #attachments == 0 then
+		return Vector3.zero, Vector3.zero, Vector3.zero, Vector3.zero
+	end
+
 	local basisCFrame = maybeBasisCFrame or CFrame.identity
 	local inverseBasis = basisCFrame:Inverse()
 	local basisPos = basisCFrame.Position
-	
+
 	local min1, max1 = Vector3.one * math.huge, -Vector3.one * math.huge
 	local min2, max2 = Vector3.one * math.huge, -Vector3.one * math.huge
 	local terrain = workspace.Terrain

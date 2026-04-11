@@ -39,6 +39,7 @@ export type Props = {
 	EndAngle: number?,
 	TickAngle: number?,
 	RadiusOffset: number?,
+	Shading: Enum.AdornShading?,
 	Hovered: boolean,
 	Thin: boolean,
 }
@@ -72,27 +73,15 @@ function RotateHandleView.render(props: Props)
 	-- Draw main rotation gimbal.
 	local halfThickness = 0.5 * thickness
 
-	children["OnTopHandle"] = React.createElement("CylinderHandleAdornment", {
+	children["Handle"] = React.createElement("CylinderHandleAdornment", {
 		Adornee = workspace.Terrain,
 		CFrame = props.HandleCFrame * CFrame.Angles(props.StartAngle or 0, math.pi / 2, math.pi / 2),
 		Height = thickness,
 		Radius = radius + halfThickness,
 		InnerRadius = radius - halfThickness,
 		Color3 = props.Color,
-		AlwaysOnTop = true,
+		Shading = props.Shading,
 		Transparency = HANDLE_DIM_TRANSPARENCY,
-		ZIndex = 0,
-		AdornCullingMode = CULLING_MODE,
-	})
-
-	children["BrightHandle"] = React.createElement("CylinderHandleAdornment", {
-		Adornee = workspace.Terrain,
-		CFrame = props.HandleCFrame * CFrame.Angles(props.StartAngle or 0, math.pi / 2, math.pi / 2),
-		Height = thickness,
-		Radius = radius + halfThickness,
-		InnerRadius = radius - halfThickness,
-		Color3 = props.Color,
-		AlwaysOnTop = false,
 		ZIndex = 0,
 		AdornCullingMode = CULLING_MODE,
 	})
@@ -130,7 +119,7 @@ function RotateHandleView.render(props: Props)
 			
 			children["Tick" .. tostring(i)] = React.createElement("BoxHandleAdornment", {
 				Adornee = workspace.Terrain,
-				AlwaysOnTop = false,
+				Shading = props.Shading,
 				Transparency = 0,
 				CFrame = cframe,
 				Color3 = props.Color,
@@ -141,7 +130,7 @@ function RotateHandleView.render(props: Props)
 
 			children["OnTopTick" .. tostring(i)] = React.createElement("BoxHandleAdornment", {
 				Adornee = workspace.Terrain,
-				AlwaysOnTop = true,
+				Shading = props.Shading,
 				Transparency = HANDLE_DIM_TRANSPARENCY,
 				CFrame = cframe,
 				Color3 = props.Color,
@@ -233,6 +222,7 @@ function RotateHandleView.hitTest(props: Props, mouseRay: Ray): number?
 	-- Top ring
 	local topPoint = point + normal * 0.5 * thickness
 	t = Math.intersectRayPlane(unitRay.Origin, unitRay.Direction, topPoint, normal)
+
 	if t >= 0 and t < smallestDistance then
 		local mouseWorld = unitRay.Origin + unitRay.Direction * t
 		local hitRadius = (mouseWorld - topPoint).Magnitude
@@ -247,6 +237,7 @@ function RotateHandleView.hitTest(props: Props, mouseRay: Ray): number?
 	-- Bottom ring
 	local bottomPoint = point - normal * 0.5 * thickness
 	t = Math.intersectRayPlane(unitRay.Origin, unitRay.Direction, bottomPoint, -normal)
+
 	if t >= 0 and t < smallestDistance then
 		local mouseWorld = unitRay.Origin + unitRay.Direction * t
 		local hitRadius = (mouseWorld - bottomPoint).Magnitude
@@ -267,6 +258,7 @@ function RotateHandleView.hitTest(props: Props, mouseRay: Ray): number?
 	-- Inner Cylinder
 	local innerRadius = radius - 0.5 * thickness
 	hit, t = Math.intersectRayCylinder(o, d, innerRadius, thickness)
+
 	if hit and t < smallestDistance then
 		foundHit = true
 		smallestDistance = t
@@ -275,6 +267,7 @@ function RotateHandleView.hitTest(props: Props, mouseRay: Ray): number?
 	-- Outer Cylinder
 	local outerRadius = radius + 0.5 * thickness
 	hit, t = Math.intersectRayCylinder(o, d, outerRadius, thickness)
+
 	if hit and t < smallestDistance then
 		foundHit = true
 		smallestDistance = t

@@ -85,24 +85,31 @@ end
 ]]
 function Math.intersectRaySphere(rayOrigin: Vector3, rayDirection: Vector3, sphereOrigin: Vector3, radius: number): (boolean, number)
 	local oc = rayOrigin - sphereOrigin
+
 	local a = rayDirection:Dot(rayDirection)
 	local b = 2 * oc:Dot(rayDirection)
 	local c = oc:Dot(oc) - radius * radius
+
 	local discriminant = b * b - 4 * a * c
+
 	if discriminant >= 0 then
 		local numerator = -b - math.sqrt(discriminant)
+
 		if numerator > 0 then
 			return true, numerator / 2 * a
 		end
 	end
+
 	return false, 0
 end
 
 function Math.regionFromParts(parts: { PVInstance }): Region3
 	local minX, minY, minZ = math.huge, math.huge, math.huge
 	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+
 	for _, part in ipairs(parts) do
 		local min, max
+
 		if part:IsA("BasePart") then
 			min = part.CFrame.Position - part.Size
 			max = part.CFrame.Position + part.Size
@@ -111,6 +118,7 @@ function Math.regionFromParts(parts: { PVInstance }): Region3
 			min = orientation - size
 			max = orientation + size
 		end
+
 		if min ~= nil and max ~= nil then
 			minX = math.min(minX, min.X)
 			minY = math.min(minY, min.Y)
@@ -120,7 +128,11 @@ function Math.regionFromParts(parts: { PVInstance }): Region3
 			maxZ = math.max(maxZ, max.Z)
 		end
 	end
-	return Region3.new(Vector3.new(minX, minY, minZ), Vector3.new(maxX, maxY, maxZ))
+
+	return Region3.new(
+		Vector3.new(minX, minY, minZ),
+		Vector3.new(maxX, maxY, maxZ)
+	)
 end
 
 

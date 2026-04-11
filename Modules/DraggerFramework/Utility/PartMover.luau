@@ -282,8 +282,8 @@ function PartMover._createMainPart(self: Class)
 
 	-- 0 Density so that we don't effect the IK drag weighting
 	part.CustomPhysicalProperties =
-		(PhysicalProperties.new :: any)(
-			0, -- Density
+		PhysicalProperties.new(
+			0.0001, -- Density
 			0.3, -- Friction
 			0.5 -- Elasticity
 		)

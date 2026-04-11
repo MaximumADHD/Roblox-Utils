@@ -45,6 +45,7 @@ function DraggingFaceInstance.new(draggerToolModel: DraggerToolModel, connection
 end
 
 function DraggingFaceInstance:enter()
+	self._draggerToolModel:setMouseCursor(StandardCursor.getClosedHand())
 end
 
 function DraggingFaceInstance:leave()
@@ -56,7 +57,6 @@ function DraggingFaceInstance:leave()
 end
 
 function DraggingFaceInstance.render(self: Class)
-	self._draggerToolModel:setMouseCursor(StandardCursor.getClosedHand())
 end
 
 function DraggingFaceInstance.processSelectionChanged(self: Class)

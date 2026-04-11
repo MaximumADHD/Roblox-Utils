@@ -43,6 +43,7 @@ end
 
 function DragSelecting.enter(self: Class)
 	self._mouseStartLocation = self._draggerToolModel._draggerContext:getMouseLocation()
+	self._draggerToolModel:setMouseCursor(StandardCursor.getArrow())
 end
 
 function DragSelecting.leave(self: Class)
@@ -54,8 +55,6 @@ function DragSelecting._init(self: Class)
 end
 
 function DragSelecting.render(self: Class): React.Node
-	self._draggerToolModel:setMouseCursor(StandardCursor.getArrow())
-
 	local startLocation =
 		self._hasMovedMouse and
 		self._dragSelector:getStartLocation() or
