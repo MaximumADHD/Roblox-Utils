@@ -212,4 +212,4 @@ export type HoverEscapeDetector = HoverEscapeDetector.Class
 export type BoundsChangedTracker = BoundsChangedTracker.Class
 export type IDraggerSchema = typeof(DraggerSchema)
 
-return table.freeze(DraggerSchema)
+return DraggerSchema

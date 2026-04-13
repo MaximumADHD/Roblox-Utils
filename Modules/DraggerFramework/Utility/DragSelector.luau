@@ -94,7 +94,7 @@ local function getSelectionFrustum(draggerContext: DraggerContext, startLocation
 	end
 end
 
-function DragSelector:getStartLocation()
+function DragSelector.getStartLocation(self: Class)
 	return self._dragStartLocation
 end
 
