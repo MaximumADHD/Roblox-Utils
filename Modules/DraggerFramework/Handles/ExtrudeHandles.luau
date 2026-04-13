@@ -4,8 +4,8 @@
 
 -- Libraries
 local DraggerFramework = script.Parent.Parent
-local Plugin = DraggerFramework.Parent.Parent
-local React = require(Plugin.Packages.React)
+local Packages = DraggerFramework.Parent
+local React = require(Packages.React)
 
 -- Dragger Framework
 local Utility = DraggerFramework.Utility
