@@ -114,7 +114,10 @@ function BoundsChangedTracker._disconnectBasisConnection(self: Class)
 end
 
 function BoundsChangedTracker.install(self: Class)
-	assert(not self._installed)
+	if self._installed then
+		return false
+	end
+	
 	self._installed = true
 
 	for _, entry in pairs(self._partToEntry) do
@@ -128,10 +131,15 @@ function BoundsChangedTracker.install(self: Class)
 	if self._basisObject then
 		self:_hookupBasisConnection()
 	end
+
+	return true
 end
 
 function BoundsChangedTracker.uninstall(self: Class)
-	assert(self._installed)
+	if not self._installed then
+		return false
+	end
+
 	self._installed = false
 
 	for _, entry in pairs(self._partToEntry) do
@@ -145,6 +153,8 @@ function BoundsChangedTracker.uninstall(self: Class)
 	if self._basisObject then
 		self:_disconnectBasisConnection()
 	end
+
+	return true
 end
 
 -- Public access for the AlignmentTool, which borrows this class
