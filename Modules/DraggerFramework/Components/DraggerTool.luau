@@ -78,7 +78,7 @@ local function DraggerToolComponent(props: Props)
 		draggerToolModel:_processSelected()
 
 		-- Trigger a render now that the model exists
-		draggerToolModel:render()
+		requestRedraw()
 
 		return function()
 			draggerToolModel:_processDeselected()
