@@ -96,9 +96,6 @@ type DraggerContext = {
     _gridSize: number,
     _rotateIncrement: number,
     _undoWaypoints: {string},
-    _isAltDown: boolean,
-    _isCtrlDown: boolean,
-    _isShiftDown: boolean,
     _hoverInstance: Instance?,
 	_insertPoint: Vector3?,
 
@@ -128,10 +125,6 @@ function DraggerContext.new(config: Config): Class
 		_shouldJoinSurfaces = true,
 		_isSimulating = false,
 		_undoWaypoints = {},
-
-		_isAltDown = false,
-		_isCtrlDown = false,
-		_isShiftDown = false,
 
 		_gridSize = 1,
 		_rotateIncrement = math.rad(30),
@@ -345,25 +338,22 @@ function DraggerContext.setSimulating(self: Class, value: boolean)
 end
 
 function DraggerContext.isAltKeyDown(self: Class)
-	return self._isAltDown
+	return UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) or
+		UserInputService:IsKeyDown(Enum.KeyCode.RightAlt)
 end
 
 function DraggerContext.isCtrlKeyDown(self: Class)
-	return self._isCtrlDown
+	return UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or
+		UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
 end
 
 function DraggerContext.isShiftKeyDown(self: Class)
-	return self._isShiftDown
+	return UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or
+		UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
 end
 
 function DraggerContext.shouldExtendSelection(self: Class)
 	return self:isCtrlKeyDown() or self:isShiftKeyDown()
-end
-
-function DraggerContext.setCtrlAltShift(self: Class, ctrl: boolean, alt: boolean, shift: boolean)
-	self._isCtrlDown = ctrl
-	self._isAltDown = alt
-	self._isShiftDown = shift
 end
 
 function DraggerContext.getGridSize(self: Class)
@@ -394,7 +384,13 @@ end
 
 function DraggerContext.gizmoRaycast(self: Class, origin: Vector3, direction: Vector3, raycastParams: RaycastParams?): RaycastResult<Gizmo>?
 	if gotStudioService then
-		return StudioService:GizmoRaycast(origin, direction, raycastParams)
+		local success, result = pcall(function ()
+			return StudioService:GizmoRaycast(origin, direction, raycastParams)
+		end)
+		
+		if success then
+			return result
+		end
 	end
 
 	return nil
