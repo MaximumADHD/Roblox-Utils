@@ -341,6 +341,7 @@ function RotateHandles.mouseDown(self: Class, mouseRay: Ray, handleId: string)
 	self._startAngle = snapToRotateIncrementIfNeeded(
 		angle, self._draggerContext:getRotateIncrement())
 
+	self._schema.beginRecording(self._draggerContext, "Axis Rotate Selection")
 	self._implementation:beginDrag(self._selectionWrapper:get(), self._selectionInfo)
 end
 

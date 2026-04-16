@@ -45,6 +45,7 @@ function DraggingFaceInstance.new(draggerToolModel: DraggerToolModel, connection
 end
 
 function DraggingFaceInstance:enter()
+	self._draggerToolModel._draggerSchema.beginRecording(self._draggerToolModel._draggerContext, "Drag Face Instance")
 	self._draggerToolModel:setMouseCursor(StandardCursor.getClosedHand())
 end
 

@@ -55,6 +55,7 @@ type BoundingBox = {
 type Schema = {
 	getBoundingBox: (selection: any, selectionInfo: any) -> (CFrame, Vector3, Vector3),
 	getMouseTarget: (draggerContext: DraggerContext, mouseRay: Ray, options: any) -> (any, BasePart?, number?),
+	beginRecording: (draggerContext: DraggerContext, waypointName: string) -> (),
 	addUndoWaypoint: (draggerContext: DraggerContext, waypointIdentifier: string, waypointText: string?) -> (),
 }
 
@@ -493,6 +494,7 @@ function ExtrudeHandle.mouseDown(self: Class, mouseRay: Ray, handleId: string?)
 	self._lastDeltaSize = Vector3.zero
 	self._lastOffset = Vector3.zero
 
+	self._schema.beginRecording(self._draggerContext, "Scale Selection")
 	self._implementation:beginScale(
 		self._selectionWrapper:get(),
 		self._selectionInfo,

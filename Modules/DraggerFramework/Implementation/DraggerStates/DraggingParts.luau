@@ -23,6 +23,7 @@ type Class = setmetatable<{
 
 function DraggingParts.new(draggerToolModel: DraggerToolModel, dragInfo: any): Class
 	draggerToolModel._boundsChangedTracker:uninstall()
+	draggerToolModel:getSchema().beginRecording(draggerToolModel._draggerContext, "End Freeform Drag")
 
 	local self = setmetatable({
 		_draggerToolModel = draggerToolModel,

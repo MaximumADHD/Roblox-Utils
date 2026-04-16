@@ -266,6 +266,7 @@ function MoveHandles.mouseDown(self: Class, mouseRay: Ray, handleId: string)
 		self._draggingHandleFrac = (startDist - handleOffset) / handleLength
 	end
 
+	self._schema.beginRecording(self._draggerContext, "Axis Move Selection")
 	self._implementation:beginDrag(self._selectionWrapper:get(), self._selectionInfo)
 end
 

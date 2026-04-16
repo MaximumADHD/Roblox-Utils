@@ -19,6 +19,7 @@ local isExclusiveSelectable = require(script.isExclusiveSelectable)
 local dispatchWorldClick = require(script.dispatchWorldClick)
 local getNextSelectables = require(script.getNextSelectables)
 local addUndoWaypoint = require(script.addUndoWaypoint)
+local beginRecording = require(script.beginRecording)
 local getMouseTarget = require(script.getMouseTarget)
 local setActivePoint = require(script.setActivePoint)
 local beginBoxSelect = require(script.beginBoxSelect)
@@ -197,6 +198,11 @@ local DraggerSchema = {
 	--     to implement BoundsChangedTracker, as the bounds are assumed to be
 	--     changing every frame... at the cost of significantly worse perf.
 	SelectionInfo = SelectionInfo,
+
+	-- function beginRecording(draggerContext, waypointName)
+	-- Begin a ChangeHistoryService recording before making changes. Must be
+	-- paired with a subsequent addUndoWaypoint call to commit the recording.
+	beginRecording = beginRecording,
 
 	-- function addUndoWaypoint(draggerContext, waypointName)
 	-- Add an undo waypoint. A simple implementation would be to simply delegate

@@ -96,6 +96,7 @@ type DraggerContext = {
     _gridSize: number,
     _rotateIncrement: number,
     _undoWaypoints: {string},
+    _activeRecording: string?,
     _hoverInstance: Instance?,
 	_insertPoint: Vector3?,
 
@@ -125,6 +126,7 @@ function DraggerContext.new(config: Config): Class
 		_shouldJoinSurfaces = true,
 		_isSimulating = false,
 		_undoWaypoints = {},
+		_activeRecording = nil,
 
 		_gridSize = 1,
 		_rotateIncrement = math.rad(30),
@@ -357,29 +359,57 @@ function DraggerContext.shouldExtendSelection(self: Class)
 end
 
 function DraggerContext.getGridSize(self: Class)
-	return self._gridSize
+	if gotDraggerService then
+		if DraggerService.LinearSnapEnabled then
+			return DraggerService.LinearSnapIncrement
+		else
+			return 0
+		end
+	else
+		return self._gridSize
+	end
 end
 
 function DraggerContext.snapToGridSize(self: Class, distance: number)
 	-- Use an exact check here because we're in control of things, we can set
 	-- exactly grid size = 0 when snapping should be disabled.
-	if self._gridSize > 0 then
-		return math.floor(distance / self._gridSize + 0.5) * self._gridSize
+	local gridSize = self:getGridSize()
+
+	if gridSize > 0 then
+		return math.floor(distance / gridSize + 0.5) * gridSize
 	else
 		return distance
 	end
 end
 
 function DraggerContext.getRotateIncrement(self: Class)
-	return self._rotateIncrement
+	if gotDraggerService then
+		if DraggerService.AngleSnapEnabled then
+			return math.rad(DraggerService.AngleSnapIncrement)
+		else
+			return 0
+		end
+	else
+		return self._rotateIncrement
+	end
 end
 
 function DraggerContext.setGridSize(self: Class, value: number)
-	self._gridSize = math.max(value, 0.001)
+	if gotDraggerService then
+		DraggerService.LinearSnapEnabled = value > 0
+		DraggerService.LinearSnapIncrement = value
+	else
+		self._gridSize = math.max(value, 0.001)
+	end
 end
 
 function DraggerContext.setRotateIncrement(self: Class, value: number)
-	self._rotateIncrement = value
+	if gotDraggerService then
+		DraggerService.AngleSnapEnabled = value > 0
+		DraggerService.AngleSnapIncrement = math.deg(value)
+	else
+		self._rotateIncrement = math.max(value, 0.001)
+	end
 end
 
 function DraggerContext.gizmoRaycast(self: Class, origin: Vector3, direction: Vector3, raycastParams: RaycastParams?): RaycastResult<Gizmo>?
@@ -416,10 +446,22 @@ function DraggerContext.shouldAlignDraggedObjects(self: Class)
 	return self._config.ShouldAlignDraggedObjects or false
 end
 
+function DraggerContext.beginRecording(self: Class, waypointName: string)
+	if gotChangeHistoryService then
+		pcall(function()
+			self._activeRecording = ChangeHistoryService:TryBeginRecording(waypointName)
+		end)
+	end
+end
+
 function DraggerContext.addUndoWaypoint(self: Class, waypointIdentifier: string, waypointText: string)
 	if gotChangeHistoryService then
-		pcall(function ()
-			ChangeHistoryService:SetWaypoint(waypointIdentifier)
+		local recording = self._activeRecording
+		self._activeRecording = nil
+		pcall(function()
+			if recording then
+				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+			end
 		end)
 	end
 

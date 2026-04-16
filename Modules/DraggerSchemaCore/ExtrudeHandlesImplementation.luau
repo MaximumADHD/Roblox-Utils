@@ -51,6 +51,7 @@ export type ExtrudeHandlesImplementation = {
 	_fixupScales: { [DataModelMesh]: Vector3 },
 	_fixupPartPivot: { [BasePart]: CFrame },
 	_fixupModelPivot: { [Model]: CFrame },
+	_originalAttachmentCFrameMap: { [Attachment]: CFrame },
 }
 
 type Proto = typeof(ExtrudeHandlesImplementation)
@@ -74,6 +75,7 @@ function ExtrudeHandlesImplementation.new(draggerContext: DraggerContext): Class
 		_fixupScales = {},
 		_fixupPartPivot = {},
 		_fixupModelPivot = {},
+		_originalAttachmentCFrameMap = {},
 	}, ExtrudeHandlesImplementation) :: Class
 end
 
@@ -306,6 +308,11 @@ function ExtrudeHandlesImplementation.beginScale(self: Class, selection: { Insta
 		self._originalSizeMap[part] = part.Size
 	end
 
+	self._originalAttachmentCFrameMap = {}
+	for _, attachment in ipairs(self._attachmentsToMove) do
+		self._originalAttachmentCFrameMap[attachment] = attachment.WorldCFrame
+	end
+
 	self._lastDeltaSize = Vector3.zero
 	self._jointMaker:pickUpParts(self._partsToResize)
 	self._jointMaker:anchorParts()
@@ -402,6 +409,16 @@ function ExtrudeHandlesImplementation.updateScale(self: Class, localDeltaSize: V
 			totalOffsetForPartMap[part] = globalOffset + offsetFromCenter * (totalScale - 1)
 		end
 
+		local totalOffsetForAttachmentMap = {} :: {
+			[Attachment]: Vector3,
+		}
+
+		for _, attachment in ipairs(self._attachmentsToMove) do
+			local originalPosition = self._originalAttachmentCFrameMap[attachment].Position
+			local offsetFromCenter = originalPosition - center
+			totalOffsetForAttachmentMap[attachment] = globalOffset + offsetFromCenter * (totalScale - 1)
+		end
+
 		doResize = function (frac: number)
 			self._lastDeltaSize = localDeltaSize * frac
 			lastOffset = localOffset * frac
@@ -411,6 +428,10 @@ function ExtrudeHandlesImplementation.updateScale(self: Class, localDeltaSize: V
 			for part, totalOffset in totalOffsetForPartMap do
 				part.CFrame = self._originalCFrameMap[part] + totalOffset * frac
 				part.Size = self._originalSizeMap[part] * scaleVector
+			end
+
+			for attachment, totalOffset in totalOffsetForAttachmentMap do
+				attachment.WorldCFrame = self._originalAttachmentCFrameMap[attachment] + totalOffset * frac
 			end
 		end
 	end
@@ -453,6 +474,7 @@ end
 
 function ExtrudeHandlesImplementation.endScale(self: Class)
 	self._originalSizeMap = {}
+	self._originalAttachmentCFrameMap = {}
 
 	if self._jointPairs then
 		self._jointPairs:createJoints()
