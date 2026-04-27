@@ -1,12 +1,11 @@
 [package]
 name = "maximumadhd/crunch-table"
-description = "CrunchTable - A table compression library for Luau."
-version = "1.0.2"
+description = "CrunchTable - A shallow typechecked wrapper around Squash that allows you to define a data layout without needing to worry about the underlying serdes functions."
+version = "1.1.0"
 license = "MIT"
 authors = ["MaximumADHD"]
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 
 [dependencies]
-Guid = "maximumadhd/guid@1.0.1"
-BufferExtras = "maximumadhd/buffer-extras@1.0.1"
+Squash = "data-oriented-house/squash@4.1.0"

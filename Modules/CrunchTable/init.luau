@@ -1,534 +1,319 @@
--- CrunchTable lets you define compression schemes for simple tables to be sent by roblox
--- If a field in a table is not defined in the layout, it will be ignored and stay in the table
--- If a field in a table is not present, but is defined in the layout, it'll default to 0 (or equiv)
-
 --!native
 --!strict
 
+--- CrunchTable is a shallow typechecked wrapper around Squash that allows you to define 
+--- a data layout without needing to worry about the underlying serdes functions. It also
+--- provides a more user-friendly API for compressing and decompressing data.
+
 local CrunchTable = {}
+CrunchTable.__index = CrunchTable
+
 local Shared = script.Parent
+local Squash = require(Shared.Squash)
 
-local Guid = require(Shared.Guid)
-local BufferExtras = require(Shared.BufferExtras)
+type Cursor = Squash.Cursor
+type SerDes<T... = ...any> = Squash.SerDes<T...>
 
-export type LazyTable = {
-    [any]: any 
+local I8 = Squash.i8()
+local U8 = Squash.u8()
+local I16 = Squash.i16()
+local U16 = Squash.u16()
+local I32 = Squash.i32()
+local U32 = Squash.u32()
+local F32 = Squash.f32()
+local F64 = Squash.f64()
+local VLQ = Squash.vlq()
+local STR = Squash.string()
+local CF = Squash.CFrame(F32)
+local COLOR3 = Squash.Color3()
+local VEC2 = Squash.Vector2(F32)
+local VEC3 = Squash.Vector3(F32)
+local BOOL = Squash.boolean() :: SerDes<boolean>
+
+export type CrunchType = 
+    | "u8"
+    | "i8"
+    | "u16"
+    | "i16"
+    | "u32"
+    | "i32"
+    | "f32"
+    | "f64"
+    | "vlq"
+    | "boolean"
+    | "string"
+    | "Vector2"
+    | "Vector3"
+    | "CFrame"
+    | "Color3"
+
+type TypeMap = {
+    u8: number,
+    i8: number,
+    u16: number,
+    i16: number,
+    u32: number,
+    i32: number,
+    f32: number,
+    f64: number,
+    vlq: number,
+    CFrame: CFrame,
+    Color3: Color3,
+    string: string,
+    boolean: boolean,
+    Vector2: Vector2,
+    Vector3: Vector3,
 }
 
-export type BinaryTable = {
-    _b: buffer,
-    [string]: any,
+local writers: { [string]: SerDes } = {
+    u8 = U8,
+    i8 = I8,
+    u16 = U16,
+    i16 = I16,
+    u32 = U32,
+    i32 = I32,
+    f32 = F32,
+    f64 = F64,
+    vlq = VLQ,
+    CFrame = CF,
+    string = STR,
+    boolean = BOOL,
+    Vector2 = VEC2,
+    Vector3 = VEC3,
+    Color3 = COLOR3,
 }
 
-CrunchTable.Enum = table.freeze({
-    IGNORE = 0,
+type function Append(serialType: type, keyType: type, tagType: type)
+    local serial = serialType:value()
+    assert(type(serial) == "string", "Serial must be a string")
 
-    BOOL = 1,
-    BOOLEAN = 1,
-
-    UINT8 = 2,
-    BYTE = 2,
+    local key = keyType:value()
+    assert(type(key) == "string", "Key must be a string")
+    assert(key:match("^[%w_]+$"), "Key can only contain alphanumeric characters and underscores")
     
-    INT8 = 3,
-    SBYTE = 3,
+    local tag = tagType:value()
+    assert(type(tag) == "string", "Tag must be a string")
+    assert(tag:match("^[%w_]+$"), "Tag can only contain alphanumeric characters and underscores")
 
-    UINT16 = 4,
-    USHORT = 4,
+    local current = {}
     
-    INT16 = 5,
-    SHORT = 5,
+    for _, pair in serial:split("|") do
+        local key, tag = unpack(pair:split("="))
 
-    UINT32 = 6,
-    UINT = 6,
+        if key and tag then
+            current[key] = tag
+        end
+    end
 
-    INT32 = 7,
-    INT = 7,
+    if current[key] then
+        print(`Key '{key}' was added to the layout more than once!`)
+    end
 
-    FLOAT16 = 8,
-    HALF = 8,
+    if #serial > 0 then
+        serial ..= "|"
+    end
 
-    FLOAT32 = 9,
-    SINGLE = 9,
-    FLOAT = 9,
+    serial ..= `{key}={tag}`
+    return types.singleton(serial)
+end
 
-    FLOAT64 = 10,
-    DOUBLE = 10,
+type function Layout(serialType: type, typeMap: type): type
+    local lookup = {}
 
-    INT53 = 11,
-    UINT53 = 12,
+    for keyType, rw in typeMap:properties() do
+        local key = keyType:value()
+        local read = rw.read
 
-    Vector2 = 13,
-    Vector3 = 14,
-    NumberRange = 15,
+        assert(type(key) == "string", "Key must be a string")
+        assert(key:match("^[%w_]+$"), "Key can only contain alphanumeric characters and underscores")
+        
+        if read then
+            lookup[key] = read
+        end
+    end
+
+    local serial = serialType:value()
+    assert(type(serial) == "string", "Layout must be a string")
     
-    STRING8 = 16,
-    STRING16 = 17,
-    STRING24 = 18,
-    STRING32 = 19,
-    STRING64 = 20,
-
-    GUID = 21,
-})
-
-local building = {} :: {
-    [Layout]: boolean
-}
-
-local meta = {} :: {
-    [number]: {
-        Size: number,
-        Default: any,
-        Reader: (buffer, number) -> any,
-        Writer: (buffer, number, any) -> (),
+    local layout = {} :: {
+        [type]: type
     }
-}
 
-local function stringIO(size: number)
-    return {
-        Size = size,
-        Default = "",
+    for _, pair in serial:split("|") do
+        local key, tag = unpack(pair:split("="))
 
-        Reader = function(buf: buffer, offset: number): string
-            local str = buffer.readstring(buf, offset, size)
-            return str:gsub("\0", "")
-        end,
+        if key and tag then
+            local rawType = lookup[tag]
 
-        Writer = function(buf: buffer, offset: number, value: string)
-            for i = 1, math.min(#value, size) do
-                local char = value:sub(i, i)
-                buffer.writeu8(buf, offset + i - 1, char:byte())
+            if rawType then
+                layout[types.singleton(key)] = rawType
             end
-        end,
+        end
+    end
+
+    return types.newtable(layout)
+end
+
+type function PackedTable(dataType: type, layoutType: type): type
+    local ignoreMap = {}
+
+    for keyType, rw in layoutType:properties() do
+        local key = keyType:value()
+        
+        if type(key) == "string" then
+            ignoreMap[key] = true
+        end
+    end
+
+    local result = {} :: {
+        [type]: {
+            read: type?,
+            write: type?,
+        }
     }
-end
-
-meta[CrunchTable.Enum.IGNORE] = table.freeze({
-    Size = 0,
-    Default = nil,
-    Reader = function() end,
-    Writer = function() end,
-})
-
-meta[CrunchTable.Enum.BOOL] = table.freeze({
-    Size = 1,
-    Default = false,
-
-    Reader = function(buf: buffer, offset: number): boolean
-        return buffer.readu8(buf, offset) > 0
-    end,
-
-    Writer = function(buf: buffer, offset: number, value: boolean)
-        buffer.writeu8(buf, offset, value and 1 or 0)
-    end,
-})
-
-meta[CrunchTable.Enum.UINT8] = table.freeze({
-    Size = 1,
-    Default = 0,
-    Reader = buffer.readu8,
-    Writer = buffer.writeu8,
-})
-
-meta[CrunchTable.Enum.INT8] = table.freeze({
-    Size = 1,
-    Default = 0,
-    Reader = buffer.readi8,
-    Writer = buffer.writei8,
-})
-
-meta[CrunchTable.Enum.UINT16] = table.freeze({
-    Size = 2,
-    Default = 0,
-    Reader = buffer.readu16,
-    Writer = buffer.writeu16,
-})
-
-meta[CrunchTable.Enum.INT16] = table.freeze({
-    Size = 2,
-    Default = 0,
-    Reader = buffer.readi16,
-    Writer = buffer.writei16,
-})
-
-meta[CrunchTable.Enum.UINT32] = table.freeze({
-    Size = 4,
-    Default = 0,
-    Reader = buffer.readu32,
-    Writer = buffer.writeu32,
-})
-
-meta[CrunchTable.Enum.INT32] = {
-    Size = 4,
-    Default = 0,
-    Reader = buffer.readi32,
-    Writer = buffer.writei32,
-}
-
-meta[CrunchTable.Enum.FLOAT16] = table.freeze({
-    Size = 2,
-    Default = 0,
     
-    Reader = BufferExtras.ReadFloat16,
-    Writer = BufferExtras.WriteFloat16,
-})
+    if dataType:is("table") then
+        for keyType, rw in dataType:properties() do
+            local key = keyType:value()
 
-meta[CrunchTable.Enum.FLOAT32] = table.freeze({
-    Size = 4,
-    Default = 0,
-    Reader = buffer.readf32,
-    Writer = buffer.writef32,
-})
-
-meta[CrunchTable.Enum.FLOAT64] = table.freeze({
-    Size = 8,
-    Default = 0,
-    Reader = buffer.readf64,
-    Writer = buffer.writef64,
-})
-
-meta[CrunchTable.Enum.INT53] = table.freeze({
-    Size = 8,
-    Default = 0,
-
-    Reader = BufferExtras.ReadInt53,
-    Writer = BufferExtras.WriteInt53,
-})
-
-meta[CrunchTable.Enum.UINT53] = table.freeze({
-    Size = 8,
-    Default = 0,
-
-    Reader = BufferExtras.ReadUInt53,
-    Writer = BufferExtras.WriteUInt53,
-})
-
-meta[CrunchTable.Enum.Vector2] = {
-    Size = 8,
-    Default = Vector2.zero,
-
-    Reader = function(buf: buffer, offset: number): Vector2
-        local x = buffer.readf32(buf, offset)
-        local y = buffer.readf32(buf, offset + 4)
-        return Vector2.new(x, y)
-    end,
-
-    Writer = function(buf: buffer, offset: number, value: Vector2)
-        buffer.writef32(buf, offset, value.X)
-        buffer.writef32(buf, offset + 4, value.Y)
-    end,
-}
-
-meta[CrunchTable.Enum.Vector3] = {
-    Size = 12,
-    Default = Vector3.zero,
-
-    Reader = function(buf: buffer, offset: number): Vector3
-        local x = buffer.readf32(buf, offset)
-        local y = buffer.readf32(buf, offset + 4)
-        local z = buffer.readf32(buf, offset + 8)
-
-        return Vector3.new(x, y, z)
-    end,
-
-    Writer = function(buf: buffer, offset: number, value: Vector3)
-        buffer.writef32(buf, offset, value.X)
-        buffer.writef32(buf, offset + 4, value.Y)
-        buffer.writef32(buf, offset + 8, value.Z)
-    end,
-}
-
-meta[CrunchTable.Enum.NumberRange] = {
-    Size = 8,
-    Default = NumberRange.new(0),
-
-    Reader = function(buf: buffer, offset: number): NumberRange
-        local min = buffer.readf32(buf, offset)
-        local max = buffer.readf32(buf, offset + 4)
-        return NumberRange.new(min, max)
-    end,
-
-    Writer = function(buf: buffer, offset: number, value: NumberRange)
-        buffer.writef32(buf, offset, value.Min)
-        buffer.writef32(buf, offset + 4, value.Max)
-    end,
-}
-
-meta[CrunchTable.Enum.GUID] = {
-    Size = 16,
-    Default = "00000000-0000-0000-0000-000000000000",
-
-    Reader = Guid.Decompress,
-    Writer = Guid.Compress,
-}
-
-meta[CrunchTable.Enum.STRING8] = stringIO(8)
-meta[CrunchTable.Enum.STRING16] = stringIO(16)
-meta[CrunchTable.Enum.STRING24] = stringIO(24)
-meta[CrunchTable.Enum.STRING32] = stringIO(32)
-meta[CrunchTable.Enum.STRING64] = stringIO(64)
-
-local Layout = {}
-Layout.__index = Layout
-
-type FieldInfo = {
-    Required: boolean,
-    Default: any,
-    Name: string,
-    Enum: number,
-    Size: number,
-
-    Read: (buffer, number) -> any,
-    Write: (buffer, number, any) -> (),
-}
-
--- stylua: ignore
-export type Layout = typeof(setmetatable({} :: {
-    _building: boolean?,
-
-    FieldsByName: {
-        [string]: FieldInfo,
-    },
-
-    Fields: {FieldInfo},
-    FieldBytes: number,
-    TotalBytes: number,
-
-    ContentBytes: number,
-    ContentReader: (buffer, number) -> number,
-    ContentWriter: (buffer, number, number) -> (),
-}, Layout))
-
-local function calcSize(self: Layout)
-    if building[self] then
-        return
+            if type(key) == "string" then
+                if not ignoreMap[key] then
+                    result[keyType] = rw
+                end
+            end
+        end
     end
 
-    local fields = self.Fields
-    local numFields = #fields
-
-    local contentBytes
-    local contentReader
-    local contentWriter
-
-    if numFields <= 8 then
-        contentBytes = 1
-        contentReader = buffer.readu8
-        contentWriter = buffer.writeu8
-    elseif numFields <= 16 then
-        contentBytes = 2
-        contentReader = buffer.readu16
-        contentWriter = buffer.writeu16
-    elseif numFields <= 32 then
-        contentBytes = 4
-        contentReader = buffer.readu32
-        contentWriter = buffer.writeu32
-    else
-        error("!! FATAL: Exceeded limit of 32 fields in CrunchTable layout!")
-    end
-
-    local fieldBytes = 0
-    self.ContentBytes = contentBytes
-    self.ContentReader = contentReader
-    self.ContentWriter = contentWriter
-    
-    for index, rec in self.Fields do
-        fieldBytes += rec.Size
-    end
-
-    self.FieldBytes = fieldBytes
-    self.TotalBytes = contentBytes + fieldBytes
-end
-
---[=[
-    Call this to optimize redundant calculations when adding fields to the layout.
-    
-    **IMPORTANT:** Make sure to call End() after you're done adding fields
-
-    @param fieldsAreRequiredByDefault If `true`, all fields added will be marked as **required** unless marked otherwise. If `false`, all fields added will be marked as **optional** unless marked otherwise. Default: `true`.
-    @return The `Layout` object.
-]=]
-function Layout.Begin(self: Layout, fieldsAreRequiredByDefault: boolean?): Layout
-    if fieldsAreRequiredByDefault == nil then
-        building[self] = true
-    else
-        building[self] = fieldsAreRequiredByDefault
-    end
-
-    return self
-end
-
---[=[
-    Finishes the layout and calculates its size.
-]=]
-function Layout.End(self: Layout)
-    if building[self] ~= nil then
-        building[self] = nil
-        calcSize(self)
-    end
-end
-
-function Layout.Add(self: Layout, field: string, enum: number, required: boolean?): Layout
-    local fieldMeta = meta[enum]
-
-    local isRequired = if required == nil
-        then building[self]
-        else required
-
-    local fieldInfo = table.freeze({
-        Required = isRequired,
-        Default = fieldMeta.Default,
-        Write = fieldMeta.Writer,
-        Read = fieldMeta.Reader,
-        Size = fieldMeta.Size,
-        Name = field,
-        Enum = enum,
+    local cursor = types.newtable(nil, {
+        index = types.number,
+        readresult = types.buffer,
+        writeresult = types.buffer,
     })
 
-    self.FieldsByName[field] = fieldInfo
-    table.insert(self.Fields, fieldInfo)
+    result[types.singleton("_b")] = {
+        read = cursor,
+        write = cursor,
+    }
 
-    calcSize(self)
+    return types.newtable(result)
+end
+
+type function UnpackedTable(dataType: type, layoutType: type): type
+    local result = {} :: {
+        [type]: {
+            read: type?,
+            write: type?,
+        }
+    }
+
+    if dataType:is("table") then
+        for keyType, rw in dataType:properties() do
+            local key = keyType:value()
+
+            if key == "_b" then
+                continue
+            end
+
+            result[keyType] = rw
+        end
+    end
+
+    for keyType, rw in layoutType:properties() do
+        result[keyType] = rw
+    end
+
+    return types.newtable(result)
+end
+
+type CrunchTable<Serial = ""> = setmetatable<{
+    _serial: Serial,
+}, typeof(CrunchTable)>
+
+type BinaryTable<Partial> = Partial & {
+    _b: Cursor,
+}
+
+type _Layout<Serial = ""> = Layout<Serial, TypeMap>
+export type Class = CrunchTable<"">
+
+local function new(): Class
+    return setmetatable({
+        _serial = "",
+    }, CrunchTable)
+end
+
+function CrunchTable.Field<Serial, Key, Type, Optional>(
+    self: CrunchTable<Serial>,
+    key: Key | "",
+    type: CrunchType & (Type | "")
+): CrunchTable<Append<Serial, Key, Type>>
+    local serial = tostring(self._serial)
+    assert(string.match(key, "^[%w_]+$"), "Key can only contain alphanumeric characters and underscores")
+    assert(string.match(type, "^[%w_]+$"), "Type can only contain alphanumeric characters and underscores")
+
+    if #serial > 0 then
+        serial ..= "|"
+    end
+    
+    serial ..= `{key}={type}`
+    self._serial = serial
+
     return self
 end
 
-function Layout.GetFieldInfo(self: Layout, field: string): FieldInfo?
-    return self.FieldsByName[field]
-end
+function CrunchTable.Compress<Serial, Data>(
+    self: CrunchTable<Serial>,
+    data: Data & _Layout<Serial>,
+    cursor: Cursor?
+): PackedTable<Data, _Layout<Serial>>
+    local serial = tostring(self._serial)
+    local rawData = data :: any
 
-function Layout.WriteToBuffer(self: Layout, srcData: LazyTable, buf: buffer, start: number?, onWrite: (key: string) -> ()?): number
-    local write = self.ContentWriter
-    local offset = (start or 0) + self.ContentBytes
+    local cursor = cursor or Squash.cursor()
+    rawData._b = cursor
 
-    local contents = 0
-    local bit = 1
-    
-    for index, rec in self.Fields do
-        local key = rec.Name
-        local srcValue = srcData[key]
-        
-        if srcValue ~= nil then
-            rec.Write(buf, offset, srcValue)
-            offset += rec.Size
-            contents += bit
+    for i, field in serial:split("|") do
+        local key, tag = unpack(field:split("="))
 
-            if onWrite then
-                onWrite(key)
+        if key and tag then
+            local value = rawData[key]
+            local writer = writers[tag]
+
+            if writer then
+                writer.ser(cursor, value)
+                rawData[key] = nil
             end
         end
-        
-        bit += bit
-    end
-    
-    write(buf, start or 0, contents)
-    return offset
-end
-
-function Layout.Compress(self: Layout, srcData: LazyTable): BinaryTable
-    local packet = table.clone(srcData)
-
-    -- Create buffer with max possible size.
-    local work = buffer.create(self.TotalBytes)
-
-    local size = self:WriteToBuffer(srcData, work, 0, function(key: string)
-        packet[key] = nil
-    end)
-
-    -- Copy the buffer to a new one with the exact size.
-    local b = buffer.create(size)
-    buffer.copy(b, 0, work, 0, size)
-    packet._b = b
-
-    return packet
-end
-
-function Layout.ReadFromBuffer<V>(self: Layout, buf: buffer, start: number, callback: (key: string, value: V) -> ()): number
-    local reader = self.ContentReader
-    local offset = start or 0
-
-    local contentBits
-    local bit = 1
-
-    contentBits = reader(buf, offset)
-    offset += self.ContentBytes
-
-    for index, rec in self.Fields do
-        if bit32.btest(contentBits, bit) then
-            local value = rec.Read(buf, offset)
-            callback(rec.Name, value)
-            offset += rec.Size
-        elseif rec.Required then
-            callback(rec.Name, rec.Default)
-        end
-
-        bit += bit
     end
 
-    return offset
+    return rawData
 end
 
-function Layout.Decompress(self: Layout, packet: BinaryTable): LazyTable
-    local buf = packet._b
+function CrunchTable.Decompress<Serial, Partial>(
+    self: CrunchTable<Serial>,
+    data: BinaryTable<Partial>
+): UnpackedTable<Partial, _Layout<Serial>>
+    local serial = tostring(self._serial)
+    local rawData = data :: any
 
-    local data: LazyTable = table.clone(packet)
-    data._b = nil
+    local cursor: Cursor = rawData._b
+    rawData._b = nil
 
-    self:ReadFromBuffer(buf, 0, function(key: string, value: any)
-        data[key] = value
-    end)
+    for i, field in serial:split("|") do
+        local key, tag = unpack(field:split("="))
 
-    return data
-end
+        if key and tag then
+            local reader = writers[tag]
 
-function Layout.Clone(self: Layout): Layout
-    local newLayout = setmetatable({
-        FieldsByName = table.clone(self.FieldsByName),
-        Fields = table.clone(self.Fields),
-
-        TotalBytes = self.TotalBytes,
-        FieldBytes = self.FieldBytes,
-        ContentBytes = self.ContentBytes,
-
-        ContentReader = self.ContentReader,
-        ContentWriter = self.ContentWriter,
-    }, Layout)
-
-    return newLayout
-end
-
-function CrunchTable.new(lazyFields: { [string]: number }?): Layout
-    local layout = setmetatable({
-        FieldsByName = {},
-        Fields = {},
-
-        TotalBytes = 0,
-        FieldBytes = 0,
-        ContentBytes = 0,
-
-        ContentReader = buffer.readu8,
-        ContentWriter = buffer.writeu8,
-    }, Layout)
-
-    if lazyFields then
-        -- Order needs to be deterministic so its constant across all clients.
-        -- If the order shouldn't be alphabetical, use the Begin/End API directly.
-        local keys = {}
-
-        for key in lazyFields do
-            table.insert(keys, key)
+            if reader then
+                rawData[key] = reader.des(cursor)
+            end
         end
-
-        layout:Begin(false)
-        table.sort(keys)
-
-        for i, key in keys do
-            local enum = lazyFields[key]
-            layout:Add(key, enum)
-        end
-
-        layout:End()
     end
 
-    return layout
+    return rawData
 end
 
-return CrunchTable
+return table.freeze({
+    new = new,
+})

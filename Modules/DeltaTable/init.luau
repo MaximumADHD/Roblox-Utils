@@ -8,16 +8,16 @@ export type LazyTable = {
 }
 
 export type Patch = {
-    Path: { string },
+    Path: { any },
     Value: any,
 }
 
 export type Trace = {
-    Path: { string },
-    OnApply: (path: { string }, value: any) -> (),
+    Path: { any },
+    OnApply: (path: { any }, value: any) -> (),
 }
 
-local function Deep(tbl: any): any
+local function Deep<T>(tbl: T & LazyTable): T
     local tCopy = table.create(#tbl)
     setmetatable(tCopy, getmetatable(tbl))
 
@@ -48,7 +48,7 @@ local function ParseDeltaKey(key: any): any
     return key
 end
 
-local function Apply(maybeTarget: LazyTable?, deltaTable: LazyTable, trace: Trace?)
+local function Apply<A, B>(maybeTarget: (A & LazyTable)?, deltaTable: LazyTable, trace: Trace?)
     local target: LazyTable = maybeTarget or {}
     local deletions = deltaTable.__deletions
 
@@ -60,7 +60,7 @@ local function Apply(maybeTarget: LazyTable?, deltaTable: LazyTable, trace: Trac
         local key = ParseDeltaKey(deltaKey)
 
         if trace then
-            table.insert(trace.Path, tostring(key))
+            table.insert(trace.Path, key)
         end
 
         if type(deltaTable[deltaKey]) == "table" then
@@ -96,7 +96,7 @@ end
 DeltaTable.DeepCopy = Deep
 
 --- Compares two tables, and produces a new table containing the differences
-function DeltaTable.Create(oldTable: any, newTable: any, fuzzyEpsilon: number?): (any, number)
+function DeltaTable.Create<A, B>(oldTable: (A & LazyTable)?, newTable: B & LazyTable, fuzzyEpsilon: number?): (LazyTable, number)
     if oldTable == nil then
         return Deep(newTable), 0
     end
@@ -161,14 +161,14 @@ function DeltaTable.Create(oldTable: any, newTable: any, fuzzyEpsilon: number?):
 end
 
 --- Produces a new table that is the combination of a target, and a deltaTable produced by DeltaTable.Create
-function DeltaTable.Apply(target: LazyTable?, deltaTable: LazyTable, onApply: (path: {string}, value: any) -> ()?): LazyTable
+function DeltaTable.Apply<A, B>(target: (A & LazyTable)?, deltaTable: B & LazyTable, onApply: (path: {any}, value: any) -> ()?): LazyTable
     local trace: Trace?
 
     if onApply then
         trace = {
             Path = {},
             OnApply = onApply,
-        }
+        } :: Trace
     end
 
     return Apply(target, deltaTable, trace)
