@@ -11,41 +11,12 @@ CrunchTable.__index = CrunchTable
 local Shared = script.Parent
 local Squash = require(Shared.Squash)
 
-type Cursor = Squash.Cursor
+export type Cursor = Squash.Cursor
 type SerDes<T... = ...any> = Squash.SerDes<T...>
 
-local I8 = Squash.i8()
-local U8 = Squash.u8()
-local I16 = Squash.i16()
-local U16 = Squash.u16()
-local I32 = Squash.i32()
-local U32 = Squash.u32()
 local F32 = Squash.f32()
-local F64 = Squash.f64()
-local VLQ = Squash.vlq()
-local STR = Squash.string()
-local CF = Squash.CFrame(F32)
-local COLOR3 = Squash.Color3()
-local VEC2 = Squash.Vector2(F32)
-local VEC3 = Squash.Vector3(F32)
 local BOOL = Squash.boolean() :: SerDes<boolean>
-
-export type CrunchType = 
-    | "u8"
-    | "i8"
-    | "u16"
-    | "i16"
-    | "u32"
-    | "i32"
-    | "f32"
-    | "f64"
-    | "vlq"
-    | "boolean"
-    | "string"
-    | "Vector2"
-    | "Vector3"
-    | "CFrame"
-    | "Color3"
+local BITFLAGS = Squash.boolean() :: SerDes<boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean>
 
 type TypeMap = {
     u8: number,
@@ -63,33 +34,73 @@ type TypeMap = {
     boolean: boolean,
     Vector2: Vector2,
     Vector3: Vector3,
+    NumberRange: NumberRange,
+    None: nil,
+}
+
+local None: SerDes<any> = {
+    ser = function (cursor: Cursor, value: any)
+        return
+    end,
+
+    des = function (cursor: Cursor)
+        return nil
+    end,
 }
 
 local writers: { [string]: SerDes } = {
-    u8 = U8,
-    i8 = I8,
-    u16 = U16,
-    i16 = I16,
-    u32 = U32,
-    i32 = I32,
+    u8 = Squash.u8(),
+    i8 = Squash.i8(),
+    u16 = Squash.u16(),
+    i16 = Squash.i16(),
+    u32 = Squash.u32(),
+    i32 = Squash.i32(),
+    f64 = Squash.f64(),
+    vlq = Squash.vlq(),
+
+    string = Squash.string(),
+    Color3 = Squash.Color3(),
+    CFrame = Squash.CFrame(F32),
+    Vector2 = Squash.Vector2(F32),
+    Vector3 = Squash.Vector3(F32),
+    NumberRange = Squash.NumberRange(F32),
+
     f32 = F32,
-    f64 = F64,
-    vlq = VLQ,
-    CFrame = CF,
-    string = STR,
+    None = None,
     boolean = BOOL,
-    Vector2 = VEC2,
-    Vector3 = VEC3,
-    Color3 = COLOR3,
 }
 
-type function Append(serialType: type, keyType: type, tagType: type)
-    local serial = serialType:value()
-    assert(type(serial) == "string", "Serial must be a string")
+local defaults: { [string]: any } = {
+    u8 = 0,
+    i8 = 0,
+    u16 = 0,
+    i16 = 0,
+    u32 = 0,
+    i32 = 0,
+    f32 = 0,
+    f64 = 0,
+    vlq = 0,
+
+    string = "",
+    Color3 = Color3.new(),
+    CFrame = CFrame.new(),
+    Vector2 = Vector2.new(),
+    Vector3 = Vector3.new(),
+    NumberRange = NumberRange.new(0),
+
+    None = nil,
+    boolean = false,
+}
+
+export type CrunchType = keyof<TypeMap>
+
+type function Append(schemaType: type, keyType: type, tagType: type)
+    local schema = schemaType:value()
+    assert(type(schema) == "string", "Schema must be a string")
 
     local key = keyType:value()
     assert(type(key) == "string", "Key must be a string")
-    assert(key:match("^[%w_]+$"), "Key can only contain alphanumeric characters and underscores")
+    assert(key:match("^[%w_]+%??$"), "Key can only contain alphanumeric characters and underscores")
     
     local tag = tagType:value()
     assert(type(tag) == "string", "Tag must be a string")
@@ -97,7 +108,7 @@ type function Append(serialType: type, keyType: type, tagType: type)
 
     local current = {}
     
-    for _, pair in serial:split("|") do
+    for _, pair in schema:split("|") do
         local key, tag = unpack(pair:split("="))
 
         if key and tag then
@@ -109,15 +120,15 @@ type function Append(serialType: type, keyType: type, tagType: type)
         print(`Key '{key}' was added to the layout more than once!`)
     end
 
-    if #serial > 0 then
-        serial ..= "|"
+    if #schema > 0 then
+        schema ..= "|"
     end
 
-    serial ..= `{key}={tag}`
-    return types.singleton(serial)
+    schema ..= `{key}={tag}`
+    return types.singleton(schema)
 end
 
-type function Layout(serialType: type, typeMap: type): type
+type function _Layout(schemaType: type, typeMap: type): type
     local lookup = {}
 
     for keyType, rw in typeMap:properties() do
@@ -132,20 +143,31 @@ type function Layout(serialType: type, typeMap: type): type
         end
     end
 
-    local serial = serialType:value()
-    assert(type(serial) == "string", "Layout must be a string")
+    local schema = schemaType:value()
+    assert(type(schema) == "string", "Layout must be a string")
     
     local layout = {} :: {
         [type]: type
     }
 
-    for _, pair in serial:split("|") do
+    for _, pair in schema:split("|") do
         local key, tag = unpack(pair:split("="))
 
         if key and tag then
+            local optional = false
+
+            if key:sub(-1) == "?" then
+                optional = true
+                key = key:sub(1, -2)
+            end
+
             local rawType = lookup[tag]
 
             if rawType then
+                if optional then
+                    rawType = types.optional(rawType)
+                end
+
                 layout[types.singleton(key)] = rawType
             end
         end
@@ -225,88 +247,123 @@ type function UnpackedTable(dataType: type, layoutType: type): type
     return types.newtable(result)
 end
 
-type CrunchTable<Serial = ""> = setmetatable<{
-    _serial: Serial,
+type CrunchTable<Schema = ""> = setmetatable<{
+    Schema: Schema,
 }, typeof(CrunchTable)>
 
-type BinaryTable<Partial> = Partial & {
+export type BinaryTable<Partial = any> = Partial & {
     _b: Cursor,
 }
 
-type _Layout<Serial = ""> = Layout<Serial, TypeMap>
+export type LazyTable = {
+    [any]: any
+}
+
+export type Layout<Schema = ""> = _Layout<Schema, TypeMap>
 export type Class = CrunchTable<"">
 
 local function new(): Class
     return setmetatable({
-        _serial = "",
+        Schema = "",
     }, CrunchTable)
 end
 
-function CrunchTable.Field<Serial, Key, Type, Optional>(
-    self: CrunchTable<Serial>,
+function CrunchTable.Field<Schema, Key, Type, Optional>(
+    self: CrunchTable<Schema>,
     key: Key | "",
     type: CrunchType & (Type | "")
-): CrunchTable<Append<Serial, Key, Type>>
-    local serial = tostring(self._serial)
-    assert(string.match(key, "^[%w_]+$"), "Key can only contain alphanumeric characters and underscores")
+): CrunchTable<Append<Schema, Key, Type>>
+    local serial = tostring(self.Schema)
+    assert(string.match(key, "^[%w_]+%??$"), "Key can only contain alphanumeric characters and underscores")
     assert(string.match(type, "^[%w_]+$"), "Type can only contain alphanumeric characters and underscores")
 
     if #serial > 0 then
         serial ..= "|"
     end
-    
+
     serial ..= `{key}={type}`
-    self._serial = serial
+    self.Schema = serial
 
     return self
 end
 
-function CrunchTable.Compress<Serial, Data>(
-    self: CrunchTable<Serial>,
-    data: Data & _Layout<Serial>,
+local function compress<Schema, Data>(
+    schema: (Schema | ""),
+    data: Data & Layout<Schema>,
     cursor: Cursor?
-): PackedTable<Data, _Layout<Serial>>
-    local serial = tostring(self._serial)
+): PackedTable<Data, Layout<Schema>>
     local rawData = data :: any
+    local rawSchema = tostring(schema)
 
     local cursor = cursor or Squash.cursor()
     rawData._b = cursor
 
-    for i, field in serial:split("|") do
+    local bools = {} :: { boolean }
+
+    for i, field in rawSchema:split("|") do
         local key, tag = unpack(field:split("="))
 
         if key and tag then
             local value = rawData[key]
             local writer = writers[tag]
-
+            
             if writer then
-                writer.ser(cursor, value)
+                if tag == "boolean" then
+                    table.insert(bools, value)
+                else
+                    writer.ser(cursor, value)
+                end
+
                 rawData[key] = nil
             end
         end
     end
 
+    for i = 1, #bools, 8 do
+        local a, b, c, d, e, f, g, h = table.unpack<<boolean>>(bools, i, i + 7)
+        BITFLAGS.ser(cursor, a, b, c, d, e, f, g, h)
+    end
+
     return rawData
 end
 
-function CrunchTable.Decompress<Serial, Partial>(
-    self: CrunchTable<Serial>,
+local function decompress<Schema, Partial>(
+    schema: (Schema | ""),
     data: BinaryTable<Partial>
-): UnpackedTable<Partial, _Layout<Serial>>
-    local serial = tostring(self._serial)
+): UnpackedTable<Partial, Layout<Schema>>
     local rawData = data :: any
+    local rawSchema = tostring(schema)
 
     local cursor: Cursor = rawData._b
+    local boolKeys = {}
     rawData._b = nil
 
-    for i, field in serial:split("|") do
+    for i, field in rawSchema:split("|") do
         local key, tag = unpack(field:split("="))
 
         if key and tag then
             local reader = writers[tag]
 
             if reader then
-                rawData[key] = reader.des(cursor)
+                if tag == "boolean" then
+                    table.insert(boolKeys, key)
+                else
+                    rawData[key] = reader.des(cursor)
+                end
+            end
+        end
+    end
+
+    for i = 1, #boolKeys, 8 do
+        local flags = { BITFLAGS.des(cursor) }
+
+        for j = 1, 8 do
+            local key = boolKeys[i + j - 1]
+
+            if key then
+                rawData[key] = flags[j]
+            else
+                break
             end
         end
     end
@@ -314,6 +371,47 @@ function CrunchTable.Decompress<Serial, Partial>(
     return rawData
 end
 
+local function describe<Schema>(schema: (Schema | "")): Layout<Schema>
+    local dummy: any = {}
+    
+    for i, field in tostring(schema):split("|") do
+        local key, tag = unpack(field:split("="))
+
+        if key and tag then
+            if key:sub(-1) == "?" then
+                key = key:sub(1, -2)
+            end
+
+            dummy[key] = defaults[tag]
+        end
+    end
+
+    return dummy
+end
+
+local function getKeys<Schema>(schema: (Schema | "")): { keyof<Layout<Schema>> }
+    local keys: any = {}
+
+    for i, field in tostring(schema):split("|") do
+        local key, tag = unpack(field:split("="))
+
+        if key and tag then
+            if key:sub(-1) == "?" then
+                key = key:sub(1, -2)
+            end
+
+            table.insert(keys, key)
+        end
+    end
+
+    return keys
+end
+
 return table.freeze({
     new = new,
+    Compress = compress,
+    Decompress = decompress,
+
+    GetKeys = getKeys,
+    Describe = describe,
 })

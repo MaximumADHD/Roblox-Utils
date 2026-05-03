@@ -1,7 +1,7 @@
 [package]
 name = "maximumadhd/crunch-table"
 description = "CrunchTable - A shallow typechecked wrapper around Squash that allows you to define a data layout without needing to worry about the underlying serdes functions."
-version = "1.1.0"
+version = "1.1.2"
 license = "MIT"
 authors = ["MaximumADHD"]
 registry = "https://github.com/UpliftGames/wally-index"
