@@ -3,7 +3,8 @@
 
 --- CrunchTable is a shallow typechecked wrapper around Squash that allows you to define 
 --- a data layout without needing to worry about the underlying serdes functions. It also
---- provides a more user-friendly API for compressing and decompressing data.
+--- provides a more user-friendly API for compressing and decompressing data. Squash is
+--- better suited for more complex use cases.
 
 local CrunchTable = {}
 CrunchTable.__index = CrunchTable
@@ -16,7 +17,6 @@ type SerDes<T... = ...any> = Squash.SerDes<T...>
 
 local F32 = Squash.f32()
 local BOOL = Squash.boolean() :: SerDes<boolean>
-local BITFLAGS = Squash.boolean() :: SerDes<boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean>
 
 type TypeMap = {
     u8: number,
@@ -48,7 +48,7 @@ local None: SerDes<any> = {
     end,
 }
 
-local writers: { [string]: SerDes } = {
+local writers: { [string]: SerDes<any> } = {
     u8 = Squash.u8(),
     i8 = Squash.i8(),
     u16 = Squash.u16(),
@@ -92,6 +92,10 @@ local defaults: { [string]: any } = {
     boolean = false,
 }
 
+local recordCache = {} :: {
+    [any]: SerDes<any>
+}
+
 export type CrunchType = keyof<TypeMap>
 
 type function Append(schemaType: type, keyType: type, tagType: type)
@@ -129,6 +133,10 @@ type function Append(schemaType: type, keyType: type, tagType: type)
 end
 
 type function _Layout(schemaType: type, typeMap: type): type
+    if not schemaType:is("singleton") then
+        return types.newtable({})
+    end
+
     local lookup = {}
 
     for keyType, rw in typeMap:properties() do
@@ -259,7 +267,8 @@ export type LazyTable = {
     [any]: any
 }
 
-export type Layout<Schema = ""> = _Layout<Schema, TypeMap>
+type LayoutImpl<Schema = ""> = _Layout<Schema, TypeMap>
+export type Layout<Schema = ""> = LayoutImpl<Schema>
 export type Class = CrunchTable<"">
 
 local function new(): Class
@@ -287,88 +296,123 @@ function CrunchTable.Field<Schema, Key, Type, Optional>(
     return self
 end
 
-local function compress<Schema, Data>(
-    schema: (Schema | ""),
-    data: Data & Layout<Schema>,
-    cursor: Cursor?
-): PackedTable<Data, Layout<Schema>>
-    local rawData = data :: any
-    local rawSchema = tostring(schema)
+type SchemaField = {
+    Key: string,
+    Type: string,
+    Optional: boolean,
+}
 
-    local cursor = cursor or Squash.cursor()
-    rawData._b = cursor
+local function parseSchema(rawSchema: string): { SchemaField }
+    local fields = {} :: { SchemaField }
 
-    local bools = {} :: { boolean }
+    for _, field in rawSchema:split("|") do
+        local rawKey, typeId = unpack(field:split("="))
 
-    for i, field in rawSchema:split("|") do
-        local key, tag = unpack(field:split("="))
+        if rawKey and typeId then
+            local optional = false
+            local key = rawKey
 
-        if key and tag then
-            local value = rawData[key]
-            local writer = writers[tag]
-            
-            if writer then
-                if tag == "boolean" then
-                    table.insert(bools, value)
-                else
-                    writer.ser(cursor, value)
-                end
-
-                rawData[key] = nil
+            if key:sub(-1) == "?" then
+                optional = true
+                key = key:sub(1, -2)
             end
+
+            table.insert(fields, {
+                Key = key,
+                Type = typeId,
+                Optional = optional,
+            })
         end
     end
 
-    for i = 1, #bools, 8 do
-        local a, b, c, d, e, f, g, h = table.unpack<<boolean>>(bools, i, i + 7)
-        BITFLAGS.ser(cursor, a, b, c, d, e, f, g, h)
+    return fields
+end
+
+local function getRecord<Schema>(schema: Schema): SerDes<Layout<Schema>>
+    if recordCache[schema] then
+        return recordCache[schema]
+    end
+    
+    local fields: any = {}
+
+    for i, field in parseSchema(schema) do
+        local key = field.Key
+        local typeId = field.Type
+        local writer = writers[typeId]
+
+        if writer then
+            if field.Optional then
+                writer = Squash.opt(writer)
+            end
+
+            fields[key] = writer
+        end
     end
 
+    local record = Squash.record(fields)
+    recordCache[schema] = record
+
+    return record
+end
+
+local function compressRaw<Schema>(
+    schema: Schema,
+    data: Layout<Schema>,
+    cursor: Cursor?
+): Cursor
+    local cursor = cursor or Squash.cursor()
+
+    local record = getRecord(schema)
+    record.ser(cursor, data)
+
+    return cursor
+end
+
+local function compress<Schema, Data>(
+    schema: Schema,
+    data: Data & Layout<Schema>
+): PackedTable<Data, Layout<Schema>>
+    local copy = table.clone(data)
+    local rawData = copy :: any
+
+    local rawSchema = tostring(schema)
+    local fields = parseSchema(rawSchema)
+
+    local cursor = Squash.cursor()
+    rawData._b = cursor
+
+    for i, field in fields do
+        local key = field.Key
+        rawData[key] = nil
+    end
+
+    compressRaw(schema, data, cursor)
     return rawData
+end
+
+local function decompressRaw<Schema>(
+    schema: Schema,
+    cursor: Cursor
+): Layout<Schema>
+    local record = getRecord(schema)
+    return record.des(cursor)
 end
 
 local function decompress<Schema, Partial>(
     schema: (Schema | ""),
     data: BinaryTable<Partial>
 ): UnpackedTable<Partial, Layout<Schema>>
-    local rawData = data :: any
-    local rawSchema = tostring(schema)
+    local copy = table.clone(data) :: any
+    local cursor: Cursor = copy._b
 
-    local cursor: Cursor = rawData._b
-    local boolKeys = {}
-    rawData._b = nil
+    local layout = decompressRaw(schema, cursor)
+    copy._b = nil
 
-    for i, field in rawSchema:split("|") do
-        local key, tag = unpack(field:split("="))
-
-        if key and tag then
-            local reader = writers[tag]
-
-            if reader then
-                if tag == "boolean" then
-                    table.insert(boolKeys, key)
-                else
-                    rawData[key] = reader.des(cursor)
-                end
-            end
-        end
+    for key, value in pairs(layout) do
+        copy[key] = value
     end
 
-    for i = 1, #boolKeys, 8 do
-        local flags = { BITFLAGS.des(cursor) }
-
-        for j = 1, 8 do
-            local key = boolKeys[i + j - 1]
-
-            if key then
-                rawData[key] = flags[j]
-            else
-                break
-            end
-        end
-    end
-
-    return rawData
+    return copy
 end
 
 local function describe<Schema>(schema: (Schema | "")): Layout<Schema>
@@ -409,9 +453,17 @@ end
 
 return table.freeze({
     new = new,
-    Compress = compress,
-    Decompress = decompress,
 
     GetKeys = getKeys,
     Describe = describe,
+    ToSerDes = getRecord,
+
+    Compress = compress,
+    Decompress = decompress,
+
+    CompressRaw = compressRaw,
+    DecompressRaw = decompressRaw,
+
+    CursorToBuffer = Squash.tobuffer,
+    CursorFromBuffer = Squash.frombuffer,
 })
