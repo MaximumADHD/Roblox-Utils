@@ -34,9 +34,9 @@ local U16 = Squash.u16()
 local U32 = Squash.u32()
 local F32 = Squash.f32()
 local VLQ = Squash.vlq()
-local BOOL = Squash.boolean()
 local STRING = Squash.string()
 local CFRAME = Squash.CFrame(F32)
+local BOOL = Squash.boolean() :: SerDes<boolean>
 
 local TypeEnum = table.freeze({
     Attributes = 1,
@@ -71,7 +71,9 @@ local TypeEnum = table.freeze({
     Vector3int16 = 30,
     OptionalCFrame = 31,
     Ref = 32,
-})
+}) :: {
+    [string]: number,
+}
 
 local TypeIds = {} :: {
     [number]: string
@@ -102,7 +104,9 @@ local TypeAliases = table.freeze({
     RefType = "Ref",
     Rect2D = "Rect",
     Enum = "EnumItem",
-})
+}) :: {
+    [string]: string
+}
 
 Singulars = {
     Attributes = {
@@ -147,7 +151,7 @@ Singulars = {
                 end
 
                 local valueType = typeof(value)
-                valueType = SystemTypes[valueType] or valueType 
+                valueType = TypeAliases[valueType] or valueType 
 
                 if TypeEnum[valueType] then
                     compress(cursor, valueType, value)
@@ -455,7 +459,7 @@ decompress = function (cursor: Cursor, ty: string)
     return false, ("ModelSquash - Missing decoder for property type %q"):format(ty)
 end
 
-decompressArray = function (cursor, ty)
+decompressArray = function (cursor, ty): (boolean, any)
     local arrayImpl = Arrays[ty]
 
     if arrayImpl then
@@ -472,7 +476,7 @@ decompressArray = function (cursor, ty)
     return false, "Couldn't decode values: " .. tostring(ty)
 end
 
-compress = function (cursor: Cursor, propertyType: string, value: any)
+compress = function (cursor: Cursor, propertyType: string, value: any): (boolean, any)
     local singular = Singulars[propertyType]
 
     if singular then
@@ -483,7 +487,7 @@ compress = function (cursor: Cursor, propertyType: string, value: any)
     return false, ("ModelSquash - Missing encoder for property type %q"):format(propertyType)
 end
 
-compressArray = function (cursor, propertyType, rbxValues)
+compressArray = function (cursor, propertyType, rbxValues): (boolean, any)
     assert(propertyType ~= nil, "ModelSquash - Property type descriptor is required")
     local isDefined = Singulars[propertyType] ~= nil or Arrays[propertyType] ~= nil
 

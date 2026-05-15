@@ -86,13 +86,13 @@ local propSetters = {} :: {
     [string]: (Instance, any) -> ()
 }
 
-propSetters.Tags = function (inst, tags)
+propSetters.Tags = function (inst: Instance, tags: { string })
     for i, tag in tags do
         inst:AddTag(tag)
     end
 end
 
-propSetters.Attributes = function (inst, attributes)
+propSetters.Attributes = function (inst: Instance, attributes: { [string]: any })
     for name, value in attributes do
         inst:SetAttribute(name, value)
     end
@@ -134,14 +134,16 @@ local function serialize(root: Instance): buffer
     end
 
     -- Collect properties
-    local props = {}
+    local props = {} :: {
+        [number]: PROP
+    }
 
-    for i, className in ipairs(classNames) do
+    for classIndex, className in classNames do
         local class = classMap[className]
         local objectIds = class.ObjectIds
         local propData: ReflectedProperties = ReflectionService:GetPropertiesOfClass(className)
 
-        for i, prop in propData do
+        for _, prop in propData do
             local display = prop.Display
             local permits = prop.Permits
 
@@ -165,12 +167,12 @@ local function serialize(root: Instance): buffer
 
             local prop = {
                 Name = name,
-                ClassIndex = i,
+                ClassIndex = classIndex,
                 TypeIndex = typeIndex,
                 Values = {},
             }
 
-            for i, objectId in ipairs(objectIds) do
+            for _, objectId in ipairs(objectIds) do
                 local instance = instances[objectId]
                 local value = (instance :: any)[name]
                 table.insert(prop.Values, value)
@@ -183,7 +185,7 @@ local function serialize(root: Instance): buffer
         local attributeMap = {}
         local tagMap = {}
 
-        for i, objectId in objectIds do
+        for _, objectId in ipairs(objectIds) do
             local object = instances[objectId]
             local attributes = object:GetAttributes()
             local tags = object:GetTags()
@@ -202,14 +204,14 @@ local function serialize(root: Instance): buffer
             Attributes = attributeMap
         }
 
-        for key: string, map: any in pairs(collections) do
+        for key: string, map: any in collections :: any do
             if not next(map) then
                 continue
             end
 
-            local prop = {
+            local prop: PROP = {
                 Name = key,
-                ClassIndex = i,
+                ClassIndex = classIndex,
                 TypeIndex = PropSquash.TypeEnum[key],
                 Values = {},
             }
@@ -317,8 +319,12 @@ local function deserialize(buf: buffer): Instance
     end
 
     -- Deserialize classes
-    local objects = {}
-    local classMap = {}
+    local classMap = {} :: {{
+        Name: string,
+        ObjectIds: { number },
+    }}
+
+    local objects = {} :: { Instance }
     local numClasses = VLQ.des(cursor)
 
     for i = 1, numClasses do

@@ -7,7 +7,7 @@ type Buffer = Buffer.Class
 
 local debugStack = 0
 
-local function nameof(sourceTable: { [string]: number }, value: number?): string
+local function nameof<T>(sourceTable: T, value: number?): keyof<T> | "nil"
     if value == nil then
         return "nil"
     end

@@ -131,7 +131,7 @@ local function decodeConnectivityData(buf: Buffer, stream: DracoStream, encoderM
         local connectivityMethod = U8(buf)
         stream.ConnectivityMethod = connectivityMethod
 
-        local faces = table.create(numFaces * 3)
+        local faces = table.create<<number>>(numFaces * 3)
         stream.Faces = faces
 
         if (connectivityMethod == SequentialIndicesEncodingMethod.Compressed) then
@@ -164,7 +164,7 @@ local function generateSequence(stream: DracoStream, encoderMethod: number)
         for _, decoder in ipairs(decoders) do
             local numPoints = stream.NumPoints
             
-            local pointIds = table.create(numPoints)
+            local pointIds = table.create<<number>>(numPoints)
             decoder.PointIds = pointIds
             
             for i = 1, numPoints do
@@ -187,7 +187,7 @@ local function decodeAttributeGeneric(buf: Buffer, stream: DracoStream, decoder:
     local numComponents = attribute.NumComponents
     local numValues = numEntries * numComponents
 
-    local output = table.create(numValues)
+    local output = table.create<<number>>(numValues)
     local size = DataSizes[attribute.DataType]
     
     Debug.Print(`numComponents={numComponents}, numEntries={numEntries}, numValues={numValues}, dataType={Debug.NameOf(DataTypes, attribute.DataType)}, size={size}`)
@@ -378,7 +378,14 @@ local function computeOriginalValues(
         local wrapMin = attribute.WrapMin or 0
         local maxDif = 1 + wrapMax - wrapMin
         
-        computeOriginalValue = function (predictedArray, predictedIndex, corrArray, corrIndex, outputArray, outputIndex)
+        computeOriginalValue = function (
+            predictedArray: { number }, 
+            predictedIndex: number, 
+            corrArray: { number }, 
+            corrIndex: number, 
+            outputArray: { number }, 
+            outputIndex: number
+        )
             for i = 0, numComponents - 1 do
                 local value = math.max(wrapMin, math.min(wrapMax, predictedArray[predictedIndex + i + 1])) + corrArray[corrIndex + i + 1]
                 
@@ -433,7 +440,14 @@ local function computeOriginalValues(
                     or x
         end
         
-        computeOriginalValue = function (predictedArray, predictedIndex, corrArray, corrIndex,  outputArray, outputIndex)
+        computeOriginalValue = function (
+            predictedArray: { number }, 
+            predictedIndex: number, 
+            corrArray: { number }, 
+            corrIndex: number, 
+            outputArray: { number }, 
+            outputIndex: number
+        )
             local pred = Vector2.new(
                 predictedArray[predictedIndex + 1] - centerValue,
                 predictedArray[predictedIndex + 2] - centerValue
@@ -474,7 +488,7 @@ local function computeOriginalValues(
             outputArray[outputIndex + 2] = orig.Y + centerValue
         end
     else
-        computeOriginalValue = function (predictedArray, predictedIndex, corrArray, corrIndex,  outputArray, outputIndex)
+        computeOriginalValue = function (predictedArray: { number }, predictedIndex: number, corrArray: { number }, corrIndex: number,  outputArray: { number }, outputIndex: number)
             for i = 1, numComponents do
                 outputArray[outputIndex + i] = predictedArray[predictedIndex + i] + corrArray[corrIndex + i]
             end
@@ -537,9 +551,9 @@ local function transformAttributeQuantized(decoder: Decoder, attribute: Attribut
     local numValues = #pointIds * numComponents
     local output = attribute.Output
 
-    local minValues = attribute.MinValues or {}
     local range = attribute.MaxValueDf or 0
     local quantizationBits = attribute.QuantizationBits or 0
+    local minValues: {number} = attribute.MinValues or {}
     
     local maxQuantizedValue = bit32.lshift(1, quantizationBits) - 1
     local delta = range / maxQuantizedValue
@@ -559,7 +573,7 @@ local function transformAttributeNormals(decoder: Decoder, attribute: Attribute)
     local numValues = #pointIds * 2
     local input = attribute.Output
 
-    local output = table.create(numValues * 3 / 2)
+    local output = table.create<<number>>(numValues * 3 / 2)
     attribute.Output = output
 
     local quantizationBits = attribute.QuantizationBits
@@ -622,7 +636,7 @@ local function decodeAttributeData(buf: Buffer, stream: DracoStream, encoderMeth
         local numAttributes = LEB128(buf)
         Debug.Print(`Decoder {decoder.Index}: numAttributes = {numAttributes}`)
 
-        local attributes = table.create(numAttributes)
+        local attributes = table.create<<Attribute>>(numAttributes)
         decoder.Attributes = attributes
 
         for j = 1, numAttributes do
@@ -836,7 +850,7 @@ end
 
 function DracoStream.FindFirstAttributeByType(self: DracoStream, attributeType: number | AttributeType): Attribute?
     local id = if typeof(attributeType) == "string"
-        then Constants.AttributeTypes[attributeType]
+        then (Constants.AttributeTypes :: any)[attributeType]
         else attributeType
 
     for i, attribute in self.Attributes do
@@ -844,7 +858,7 @@ function DracoStream.FindFirstAttributeByType(self: DracoStream, attributeType: 
             return attribute
         end
     end
-    
+
     return nil
 end
 
