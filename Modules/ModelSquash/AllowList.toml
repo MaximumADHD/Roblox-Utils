@@ -1,0 +1,20 @@
+[BasePart]
+MaterialVariant = true
+Color = true
+Size = true
+
+[Part]
+Shape = true
+
+[Fire]
+Heat = true
+Size = true
+
+[Smoke]
+Size = true
+Opacity = true
+RiseVelocity = true
+
+[WeldConstraint]
+Part0 = true
+Part1 = true

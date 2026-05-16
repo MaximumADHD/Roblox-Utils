@@ -5,6 +5,11 @@ local PropSquash = require(script.PropSquash)
 local ArraySquash = require(Shared.ArraySquash)
 local ReflectionService = game:GetService("ReflectionService")
 
+local AllowList = require(script.AllowList) :: {
+    [string]: { -- Class
+        [string]: true -- Property
+    }
+}
 local Accumulated = ArraySquash.Accumulated
 local AccI32 = Accumulated.I32
 
@@ -37,6 +42,7 @@ type ReflectionType = {
 
 type ReflectedProperty = {
     Name: string,
+    Owner: string,
     Serialized: boolean,
 
     Type: ReflectionType,
@@ -86,6 +92,10 @@ local propSetters = {} :: {
     [string]: (Instance, any) -> ()
 }
 
+local propCache = {} :: {
+    [string]: ReflectedProperties
+}
+
 propSetters.Tags = function (inst: Instance, tags: { string })
     for i, tag in tags do
         inst:AddTag(tag)
@@ -96,6 +106,41 @@ propSetters.Attributes = function (inst: Instance, attributes: { [string]: any }
     for name, value in attributes do
         inst:SetAttribute(name, value)
     end
+end
+
+local function getProperties(className: string): ReflectedProperties
+    local props = propCache[className]
+
+    if props == nil then
+        props = ReflectionService:GetPropertiesOfClass(className)
+        propCache[className] = props
+    end
+
+    return props
+end
+
+local function canSerialize(prop: ReflectedProperty)
+    local display = prop.Display
+    local permits = prop.Permits
+
+    if not permits.Write then
+        return false
+    end
+
+    if display and display.DeprecationMessage then
+        return false
+    end
+
+    if not prop.Serialized then
+        local owner = prop.Owner
+        local allowed = AllowList[owner] and AllowList[owner][prop.Name]
+
+        if not allowed then
+            return false
+        end
+    end
+
+    return true
 end
 
 local function serialize(root: Instance): buffer
@@ -141,17 +186,9 @@ local function serialize(root: Instance): buffer
     for classIndex, className in classNames do
         local class = classMap[className]
         local objectIds = class.ObjectIds
-        local propData: ReflectedProperties = ReflectionService:GetPropertiesOfClass(className)
 
-        for _, prop in propData do
-            local display = prop.Display
-            local permits = prop.Permits
-
-            if not (prop.Serialized and permits.Write) then
-                continue
-            end
-
-            if display and display.DeprecationMessage then
+        for _, prop in getProperties(className) do
+            if not canSerialize(prop) then
                 continue
             end
 
@@ -160,6 +197,14 @@ local function serialize(root: Instance): buffer
 
             local engineType = propType.EngineType
             local typeIndex = PropSquash.TypeEnum[engineType]
+
+            if typeIndex == nil then
+                local alias = PropSquash.TypeAliases[engineType]
+
+                if alias then
+                    typeIndex = PropSquash.TypeEnum[alias]
+                end
+            end
 
             if typeIndex == nil then
                 continue
@@ -395,10 +440,26 @@ local function deserialize(buf: buffer): Instance
     return objects[1]
 end
 
+local function getTypeIndexFromEngineType(engineType: string): number?
+    local typeIndex = PropSquash.TypeEnum[engineType]
+
+    if typeIndex == nil then
+        local alias = PropSquash.TypeAliases[engineType]
+
+        if alias then
+            typeIndex = PropSquash.TypeEnum[alias]
+        end
+    end
+
+    return typeIndex
+end
+
 return table.freeze({
     ser = serialize,
     des = deserialize,
 
     Serialize = serialize,
     Deserialize = deserialize,
+
+    GetTypeIndexFromEngineType = getTypeIndexFromEngineType,
 })

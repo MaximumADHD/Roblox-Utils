@@ -514,7 +514,24 @@ compressArray = function (cursor, propertyType, rbxValues): (boolean, any)
     return false, ("ModelSquash - Missing encoder for property type %q"):format(propertyType)
 end
 
+
+local function getTypeIndexFromEngineType(engineType: string): number?
+    local typeIndex = TypeEnum[engineType]
+
+    if typeIndex == nil then
+        local alias = TypeAliases[engineType]
+
+        if alias then
+            typeIndex = TypeEnum[alias]
+        end
+    end
+
+    return typeIndex
+end
+
 return table.freeze({
+    GetTypeIndexFromEngineType = getTypeIndexFromEngineType,
+
     TypeAliases = TypeAliases,
     TypeEnum = TypeEnum,
     TypeIds = TypeIds,

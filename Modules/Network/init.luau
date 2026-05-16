@@ -41,6 +41,10 @@ local eventIndex = {} :: {
     [string]: Class
 }
 
+local unvalidated: Validator<...any> = function (...: unknown) 
+    return ...
+end
+
 local function newEvent<T...>(id: string | EventOptions, validate: Validator<T...>): Class<T...>
     local name, reliable
 
@@ -133,23 +137,31 @@ local function newEvent<T...>(id: string | EventOptions, validate: Validator<T..
     return event
 end
 
-local function newReliableEvent<T...>(name: string, validate: Validator<T...>): Class<T...>
+local function newReliableEventImpl<T...>(name: string, maybeValidate: Validator<T...>?): Class<T...>
     local options: EventOptions | string = {
         Name = name,
         Reliable = true
     }
     
-    return newEvent(options, validate)
+    return newEvent(options, maybeValidate or unvalidated :: Validator<T...>)
 end
 
-local function newUnreliableEvent<T...>(name: string, validate: Validator<T...>): Class<T...>
+local function newUnreliableEventImpl<T...>(name: string, maybeValidate: Validator<T...>?): Class<T...>
     local options: EventOptions | string = {
         Name = name,
         Unreliable = true
     }
     
-    return newEvent(options, validate)
+    return newEvent(options, maybeValidate or unvalidated :: Validator<T...>)
 end
+
+local newReliableEvent = (newReliableEventImpl :: any) ::
+    & ((name: string) -> Class<...unknown>)
+    & (<T...>(name: string, validate: Validator<T...>) -> Class<T...>)
+
+local newUnreliableEvent = (newUnreliableEventImpl :: any) :: 
+    & ((name: string) -> Class<...unknown>)
+    & (<T...>(name: string, validate: Validator<T...>) -> Class<T...>)
 
 local function createEventReceiver<T...>(reliable: boolean, nameIndex: number, consumer: (Class, T...) -> ())
     return function (...)
