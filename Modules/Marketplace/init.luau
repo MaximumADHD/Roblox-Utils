@@ -27,22 +27,61 @@ local productInfo = {} :: {
     [string]: Promise,
 }
 
-local mockPurchaseChecks = {} :: {
+local PRODUCT_INFO_RATE = 300 -- requests per minute
+local PRODUCT_INFO_INTERVAL = 60 / PRODUCT_INFO_RATE
+local PRODUCT_INFO_MAX_RETRIES = 5
+local PRODUCT_INFO_RETRY_DELAY = 2
+
+type ProductInfoQueueEntry = {
+    Id: number,
+    InfoType: Enum.InfoType,
+    Attempts: number,
+    
+    Resolve: (any) -> (),
+    Reject: (any) -> (),
+}
+
+local productInfoQueue = {} :: { ProductInfoQueueEntry }
+local productInfoQueued = {} :: { [string]: ProductInfoQueueEntry }
+
+local mockEconomyChecks = {} :: {
     [string]: () -> boolean,
 }
 
-local function addMockPurchaseCheck(id: string, check: () -> boolean)
-    assert(RunContext.IsServer, "Mock purchase checks can only be added from the server!")
-    mockPurchaseChecks[id] = check
+local purchaseValidators = {} :: {
+    [string]: (player: Player, id: any, infoType: Enum.InfoType) -> boolean,
+}
+
+local function addMockEconomyCheck(id: string, check: () -> boolean)
+    mockEconomyChecks[id] = check
+
+    if game.JobId ~= "" then
+        if not RunContext.IsStudio then
+            warn("!!!! CAUTION: MOCK ECONOMY CHECK ADDED IN A LIVE SERVER !!!!")
+        end
+    end
 end
 
-local function removeMockPurchaseCheck(id: string)
-    assert(RunContext.IsServer, "Mock purchase checks can only be removed from the server!")
-    mockPurchaseChecks[id] = nil
+local function removeMockEconomyCheck(id: string)
+    mockEconomyChecks[id] = nil
 end
 
-local function canMockPurchase()
-    for i, check in mockPurchaseChecks do
+local function addPurchaseValidator(id: string, validator: (player: Player, id: any, infoType: Enum.InfoType) -> boolean)
+    assert(RunContext.IsServer, "Purchase validators can only be added from the server!")
+    purchaseValidators[id] = validator
+end
+
+local function removePurchaseValidator(id: string)
+    assert(RunContext.IsServer, "Purchase validators can only be removed from the server!")
+    purchaseValidators[id] = nil
+end
+
+local function canMockEconomy()
+    if next(mockEconomyChecks) == nil then
+        return false
+    end
+
+    for i, check in mockEconomyChecks do
         if not check() then
             return false
         end
@@ -107,14 +146,68 @@ local playerOwnsItem = Promise.promisify(function(player: Player, itemId: any, i
     end
 end)
 
-local getProductInfo = Promise.promisify(function(id: number, infoType: Enum.InfoType?)
-    return MarketplaceService:GetProductInfoAsync(id, infoType)
+local function enqueueProductInfoFetch(entry: ProductInfoQueueEntry, priority: boolean)
+    local key = `{entry.InfoType.Name}:{entry.Id}`
+    local existing = productInfoQueued[key]
+
+    if existing then
+        if priority then
+            local index = table.find(productInfoQueue, existing)
+
+            if index then
+                table.remove(productInfoQueue, index)
+                table.insert(productInfoQueue, 1, existing)
+            end
+        end
+
+        return
+    end
+
+    productInfoQueued[key] = entry
+
+    if priority then
+        table.insert(productInfoQueue, 1, entry)
+    else
+        table.insert(productInfoQueue, entry)
+    end
+end
+
+task.spawn(function()
+    while task.wait(PRODUCT_INFO_INTERVAL) do
+        local entry = table.remove(productInfoQueue, 1)
+
+        if not entry then
+            continue
+        end
+
+        local key = `{entry.InfoType.Name}:{entry.Id}`
+        productInfoQueued[key] = nil
+
+        local ok, result = pcall(function ()
+            warn("GetProductInfoAsync", entry.Id, entry.InfoType, "Attempt", entry.Attempts + 1)
+            return MarketplaceService:GetProductInfoAsync(entry.Id, entry.InfoType)
+        end)
+
+        if ok then
+            entry.Resolve(result)
+        else
+            entry.Attempts += 1
+
+            if entry.Attempts < PRODUCT_INFO_MAX_RETRIES then
+                task.delay(PRODUCT_INFO_RETRY_DELAY, function ()
+                    enqueueProductInfoFetch(entry, false)
+                end)
+            else
+                entry.Reject(result)
+            end
+        end
+    end
 end)
 
-local GRANT_PURCHASE = Network.Event("Marketplace_GrantPurchase", function (player, id, infoType)
+local GRANT_PURCHASE = Network.ReliableEvent("Marketplace_GrantPurchase", function (player: unknown, id: unknown, infoType: unknown)
     assert(typeof(player) == "Instance" and player:IsA("Player"))
     assert(id ~= nil)
-    
+
     if infoType == nil then
         return player, id, Enum.InfoType.Asset
     end
@@ -123,7 +216,7 @@ local GRANT_PURCHASE = Network.Event("Marketplace_GrantPurchase", function (play
     return player, id, infoType
 end)
 
-local PROMPT_PURCHASE = Network.Event("Marketplace_PromptPurchase", function (id, infoType)
+local PROMPT_PURCHASE = Network.ReliableEvent("Marketplace_PromptPurchase", function (id: unknown, infoType: unknown)
     assert(id ~= nil)
     
     if infoType == nil then
@@ -164,6 +257,11 @@ local function promiseOwnership(player: Player, id: number, infoType: Enum.InfoT
     local data = getOwnershipRecord(player, id, infoType)
 
     if not data.Promise then
+        if canMockEconomy() then
+            data.Promise = Promise.resolve(false)
+            return assert(data.Promise)
+        end
+
         local new = Promise.retryWithDelay(playerOwnsItem, 5, 2, player, id, infoType)
         data.Promise = new
 
@@ -187,25 +285,56 @@ local function getOwnershipChangedSignal(player: Player, id: number, infoType: E
     return assert(data.Changed)
 end
 
-local function promiseProductInfo(id: number, infoType: Enum.InfoType?): Promise
-    local infoType = infoType or Enum.InfoType.Asset
-    local key = `{infoType.Name}:{id}`
-    local promise = productInfo[key]
-
-    if not promise then
-        local new = Promise.retry(getProductInfo, 5, id, infoType)
-        productInfo[key] = new
-
-        new:catch(function()
-            if productInfo[key] == new then
-                productInfo[key] = nil
-            end
-        end)
-
-        promise = new
+local function promiseProductInfo(id: number, infoType: Enum.InfoType?, priority: boolean?): Promise
+    if id <= 0 then
+        return Promise.reject(`Invalid product id: {id}`)
     end
 
-    return promise
+    local resolvedInfoType = infoType or Enum.InfoType.Asset
+    local key = `{resolvedInfoType.Name}:{id}`
+    local existing = productInfo[key]
+
+    if existing then
+        if priority ~= false then
+            local queueEntry = productInfoQueued[key]
+
+            if queueEntry then
+                for i = 1, #productInfoQueue do
+                    if productInfoQueue[i] == queueEntry then
+                        table.remove(productInfoQueue, i)
+                        table.insert(productInfoQueue, 1, queueEntry)
+                        break
+                    end
+                end
+            end
+        end
+
+        return existing
+    end
+
+    local new = Promise.new(function(resolve, reject)
+        enqueueProductInfoFetch({
+            Id = id,
+            InfoType = resolvedInfoType,
+            Attempts = 0,
+            Resolve = resolve,
+            Reject = reject,
+        }, priority ~= false)
+    end)
+
+    productInfo[key] = new
+
+    new:catch(function ()
+        if productInfo[key] == new then
+            productInfo[key] = nil
+        end
+    end)
+
+    return new
+end
+
+local function prefetchProductInfo(id: number, infoType: Enum.InfoType?): Promise
+    return promiseProductInfo(id, infoType, false)
 end
 
 local function bulkResolveOwnership(player: Player, ownershipList: { VapidOwnership }): Promise
@@ -256,7 +385,7 @@ local function grantPurchase<T>(player: Player, id: T, infoType: Enum.InfoType)
     promptPurchaseFinished:Fire(player, id, infoType)
 end
 
-local function promptPurchase(id: number, infoType: Enum.InfoType?, player: Player?)
+local function promptPurchase(id: any, infoType: Enum.InfoType?, player: Player?)
     if RunContext.IsClient and not RunContext.IsEdit then
         local client = PROMPT_PURCHASE:Client()
         client:Fire(id, infoType or Enum.InfoType.Asset)
@@ -271,24 +400,19 @@ local function promptPurchase(id: number, infoType: Enum.InfoType?, player: Play
         return
     end
 
-    local canMock = canMockPurchase()
+    local canMock = canMockEconomy()
 
     if canMock or RunContext.IsEdit then
-        local success, owned = promiseOwnership(player, id, infoType):await()
-
-        if not (success and owned) then
-            if canMock then
-                warn("MOCKING PURCHASE", id, infoType, "FOR PLAYER", player)
-            elseif RunContext.IsEdit then
-                warn("MOCKING PURCHASE IN EDIT MODE", id, infoType, "FOR PLAYER", player)
-            end
-
-            grantPurchase(player, id, infoType or Enum.InfoType.Asset)
+        if canMock then
+            warn("MOCKING PURCHASE", id, infoType, "FOR PLAYER", player)
+        elseif RunContext.IsEdit then
+            warn("MOCKING PURCHASE IN EDIT MODE", id, infoType, "FOR PLAYER", player)
         end
 
+        grantPurchase(player, id, infoType or Enum.InfoType.Asset)
         return
     end
-
+    
     if infoType == Enum.InfoType.GamePass then
         MarketplaceService:PromptGamePassPurchase(player, id)
     elseif infoType == Enum.InfoType.Bundle then
@@ -300,11 +424,28 @@ local function promptPurchase(id: number, infoType: Enum.InfoType?, player: Play
     end
 end
 
+if RunContext.IsEdit then
+    local mockEconomy = workspace:GetAttribute("EditModeMockEconomy")
+
+    if mockEconomy then
+        addMockEconomyCheck("__EditMode", function ()
+            return true
+        end)
+    end
+end
+
 if RunContext.IsServer or RunContext.IsEdit then
     local promptServer = PROMPT_PURCHASE:Server()
 
     promptServer:On(function (player, id, infoType)
-        promptPurchase(id :: any, infoType, player)
+        for key, validator in purchaseValidators do
+            if not validator(player, id, infoType) then
+                warn("Purchase blocked by validator", key, "for player", player, "id", id, "infoType", infoType)
+                return
+            end
+        end
+
+        promptPurchase(id, infoType, player)
     end)
 
     local function createPurchaseFinishedCallback(infoType: Enum.InfoType)
@@ -352,13 +493,18 @@ end
 
 return table.freeze({
     GetOwnership = promiseOwnership,
-    PromptPurchase = promptPurchase,
     GetProductInfo = promiseProductInfo,
+    PrefetchProductInfo = prefetchProductInfo,
+
     BulkResolveOwnership = bulkResolveOwnership,
     GetOwnershipChangedSignal = getOwnershipChangedSignal,
 
-    AddMockPurchaseCheck = addMockPurchaseCheck,
-    RemoveMockPurchaseCheck = removeMockPurchaseCheck,
+    AddPurchaseValidator = addPurchaseValidator,
+    RemovePurchaseValidator = removePurchaseValidator,
+
+    AddMockEconomyCheck = addMockEconomyCheck,
+    RemoveMockEconomyCheck = removeMockEconomyCheck,
     
+    PromptPurchase = promptPurchase,
     PromptPurchaseFinished = promptPurchaseFinished,
 })

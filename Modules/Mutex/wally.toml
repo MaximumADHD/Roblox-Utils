@@ -1,7 +1,7 @@
 [package]
 name = "maximumadhd/mutex"
 description = "Mutex - A lightweight, attribute-controlled, mutual exclusion lock for instances"
-version = "1.0.0"
+version = "1.0.2"
 license = "MIT"
 authors = ["MaximumADHD"]
 registry = "https://github.com/UpliftGames/wally-index"
