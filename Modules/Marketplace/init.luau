@@ -2,6 +2,7 @@
 local Shared = script.Parent
 
 local Signal = require(Shared.Signal)
+local UserId = require(Shared.UserId)
 local Network = require(Shared.Network)
 local Promise = require(Shared.Promise)
 local RunContext = require(Shared.RunContext)
@@ -54,12 +55,6 @@ local purchaseValidators = {} :: {
 
 local function addMockEconomyCheck(id: string, check: () -> boolean)
     mockEconomyChecks[id] = check
-
-    if game.JobId ~= "" then
-        if not RunContext.IsStudio then
-            warn("!!!! CAUTION: MOCK ECONOMY CHECK ADDED IN A LIVE SERVER !!!!")
-        end
-    end
 end
 
 local function removeMockEconomyCheck(id: string)
@@ -126,22 +121,34 @@ export type ProductInfo = {
 }
 
 local playerOwnsItem = Promise.promisify(function(player: Player, itemId: any, infoType: Enum.InfoType?)
-    local userId = player.UserId
+    local userId, isMock = UserId.Get(player)
 
     if userId < 1 then
         return RunContext.IsStudio
     end
 
     if infoType == Enum.InfoType.Subscription then
-        local status = MarketplaceService:GetUserSubscriptionStatusAsync(player, itemId)
-        return status.IsSubscribed
+        if isMock then
+            return true
+        else
+            local status = MarketplaceService:GetUserSubscriptionStatusAsync(player, itemId)
+            return status.IsSubscribed
+        end
     elseif infoType == Enum.InfoType.GamePass then
-        return MarketplaceService:UserOwnsGamePassAsync(player.UserId, itemId)
+        return MarketplaceService:UserOwnsGamePassAsync(userId, itemId)
     elseif infoType == Enum.InfoType.Bundle then
+        if isMock then
+            return true
+        end
+
         return MarketplaceService:PlayerOwnsBundleAsync(player, itemId)
     elseif infoType == Enum.InfoType.Product then
         return false
     else
+        if isMock then
+            return true
+        end
+        
         return MarketplaceService:PlayerOwnsAssetAsync(player, itemId)
     end
 end)
@@ -184,7 +191,6 @@ task.spawn(function()
         productInfoQueued[key] = nil
 
         local ok, result = pcall(function ()
-            warn("GetProductInfoAsync", entry.Id, entry.InfoType, "Attempt", entry.Attempts + 1)
             return MarketplaceService:GetProductInfoAsync(entry.Id, entry.InfoType)
         end)
 

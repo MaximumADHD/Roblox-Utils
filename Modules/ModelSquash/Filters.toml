@@ -1,0 +1,32 @@
+# Override rules for serialization of specific properties on instances.
+# true = serialize, false = do not serialize, nil = reflection default
+
+[BasePart]
+MaterialVariant = true
+Color = true
+Size = true
+
+[Part]
+Shape = true
+
+[Fire]
+Heat = true
+Size = true
+
+[Smoke]
+Size = true
+Opacity = true
+RiseVelocity = true
+
+[ParticleEmitter]
+FlipbookIncompatible = false
+
+[MeshPart]
+CollisionFidelity = true
+RenderFidelity = true
+FluidFidelity = true
+MeshId = true
+
+[WeldConstraint]
+Part0 = true
+Part1 = true

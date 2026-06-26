@@ -15,6 +15,8 @@ local Squash = require(Shared.Squash)
 export type Cursor = Squash.Cursor
 type SerDes<T... = ...any> = Squash.SerDes<T...>
 
+local U8 = Squash.u8()
+local U16 = Squash.u16()
 local F32 = Squash.f32()
 local BOOL = Squash.boolean() :: SerDes<boolean>
 
@@ -25,6 +27,7 @@ type TypeMap = {
     i16: number,
     u32: number,
     i32: number,
+    f16: number,
     f32: number,
     f64: number,
     vlq: number,
@@ -48,10 +51,74 @@ local None: SerDes<any> = {
     end,
 }
 
+local F16: SerDes<number> = {
+    ser = function (cursor: Cursor, value: number)
+        local mantissa, exponent
+        local sign = value < 0
+
+        value = math.abs(value)
+        mantissa, exponent = math.frexp(value)
+
+        if value == math.huge then
+            U8.ser(cursor, 0b_00000000)
+
+            if sign then
+                U8.ser(cursor, 0b_11111100)
+            else
+                U8.ser(cursor, 0b_01111100)
+            end
+        elseif value ~= value or value == 0 then
+            U16.ser(cursor, 0)
+        elseif exponent + 15 <= 1 then -- Bias for halfs is 15
+            mantissa = math.floor(mantissa * 1024 + 0.5)
+            U8.ser(cursor, bit32.band(mantissa, 255)) -- Get last 8 bits from mantissa
+
+            if sign then
+                U8.ser(cursor, (128 + bit32.rshift(mantissa, 8))) -- Sign bit, 5 empty bits, 2 from mantissa
+            else
+                U8.ser(cursor, (bit32.rshift(mantissa, 8)))
+            end
+        else
+            mantissa = ((mantissa - 0.5) * 2048 + 0.5) // 1
+            U8.ser(cursor, bit32.band(mantissa, 255))
+
+            -- The bias for halfs is 15, 15-1 is 14
+            if sign then
+                U8.ser(cursor, (128 + bit32.lshift(exponent + 14, 2) + bit32.rshift(mantissa, 8)))
+            else
+                U8.ser(cursor, (bit32.lshift(exponent + 14, 2) + bit32.rshift(mantissa, 8)))
+            end
+        end
+    end,
+
+    des = function (cursor: Cursor): number
+        local b0 = U8.des(cursor)
+        local b1 = U8.des(cursor)
+
+        local sign = bit32.btest(b0, 128) and -1 or 1
+        local exponent = bit32.rshift(bit32.band(b0, 127), 2)
+        local mantissa = bit32.lshift(bit32.band(b0, 3), 8) + b1
+
+        if exponent == 31 then --2^5-1
+            if mantissa ~= 0 then
+                return (0 / 0)
+            else
+                return math.huge * sign
+            end
+        elseif exponent == 0 then
+            if mantissa == 0 then
+                return 0
+            else
+                return math.ldexp(mantissa / 1024, -14) * sign
+            end
+        end
+
+        return math.ldexp((mantissa / 1024) + 1, exponent - 15) * sign
+    end,
+}
+
 local writers: { [string]: SerDes<any> } = {
-    u8 = Squash.u8(),
     i8 = Squash.i8(),
-    u16 = Squash.u16(),
     i16 = Squash.i16(),
     u32 = Squash.u32(),
     i32 = Squash.i32(),
@@ -65,6 +132,9 @@ local writers: { [string]: SerDes<any> } = {
     Vector3 = Squash.Vector3(F32),
     NumberRange = Squash.NumberRange(F32),
 
+    u8 = U8,
+    u16 = U16,
+    f16 = F16,
     f32 = F32,
     None = None,
     boolean = BOOL,
@@ -77,6 +147,7 @@ local defaults: { [string]: any } = {
     i16 = 0,
     u32 = 0,
     i32 = 0,
+    f16 = 0,
     f32 = 0,
     f64 = 0,
     vlq = 0,

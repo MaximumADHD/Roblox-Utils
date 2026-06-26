@@ -20,6 +20,7 @@ local RunContext = require(Shared.RunContext)
 export type Config = {
     MockDataStoreService: DataStoreService?,
     AutoSaveInterval: number?,
+    AllowMockSave: boolean?,
 }
 
 --- Represents an EasyStore instance for managing player data.
@@ -37,11 +38,12 @@ export type Class<T = any> = typeof(setmetatable({} :: {
     },
 
     _maid: Trove?,
+    _allowMockSave: boolean,
     _autoSaveInterval: number,
 
     _netInit: Network.Class<LazyTable>,
     _netPatch: Network.Class<LazyTable>,
-    _netRequest: Network.Class,
+    _netRequest: Network.Class<>,
 
     _dataStoreService: DataStoreService?,
     _dataStoreName: string,
@@ -63,8 +65,12 @@ export type PlayerData<T = any> = typeof(setmetatable({} :: {
     --- The current state of the player's data. This is immutable and should only be modified through `PlayerData:Patch` on the server.
     CurrentData: T,
 
-    --- The `UserId` who owns this data profile.
+    --- The UserId who owns this profile.
     Owner: number,
+
+    -- The player currently associated with this profile.
+    -- They may not have the same UserId as the owner if they are a mock user.
+    Player: Player?,
 
     -- Is the data profile a mock user?
     IsMock: boolean,
@@ -120,7 +126,7 @@ end
 --- * If the player's data is loaded, the promise will resolve when the data has been saved.
 --- * If called on the client, the promise will reject.
 --- @return A `Promise<(), string>` that resolves when the player's data has been saved and rejects with an error message if something went wrong.
-function PlayerData.Save<T>(self: PlayerData<T>): Promise
+function PlayerData.Save<T>(self: PlayerData<T>, force: boolean?): Promise
     return Promise.new(function (resolve, reject)
         if not self.IsLoaded then
             reject("PlayerData not loaded!")
@@ -132,34 +138,25 @@ function PlayerData.Save<T>(self: PlayerData<T>): Promise
             return
         end
 
-        if not self:IsActive() then
+        local owner = self.Owner
+
+        if self.IsMock and not self._server._allowMockSave then
+            reject(`Not saving mock PlayerData for userId {owner}`)
+            return
+        end
+
+        if not self:IsActive() and not force then
             reject("PlayerData is read-only!")
             return
         end
 
-        local owner = self.Owner
-
-        if not owner then
-            if RunContext.IsEdit then
-                local StudioService = game:GetService("StudioService")
-                local userId = tonumber(StudioService:GetAttribute("MockUserId")) or StudioService:GetUserId()
-
-                owner = {
-                    UserId = userId,
-                } :: any
-            else
-                reject("PlayerData has no owner!")
-                return
-            end
-        end
-        
         local dataStore = self._server:GetDataStore()
-        local key = getProfileKey(assert(owner).UserId)
-        
+        local key = getProfileKey(owner)
+
         dataStore:UpdateAsync(key, function (oldData)
             return self.CurrentData
         end)
-        
+
         resolve()
     end)
 end
@@ -181,15 +178,25 @@ end
 --- * If called on the server, the `userId` argument is **required** and the data for the specified player will be returned.
 --- @param target The player or userId of the player to get data for. Ignored on the client and in edit mode.
 function EasyStore.Get<T>(self: Class<T>, target: (Player | number)?): PlayerData<T>
+    if RunContext.IsClient or RunContext.IsEdit then
+        target = nil
+    elseif type(target) == "number" then
+        target = Players:GetPlayerByUserId(target)
+    end
+
     local default = self.Default
     local userId, isMock = UserId.Get(target)
+
+    local realUserId = if isMock
+        then UserId.Get(target, true)
+        else userId
 
     if RunContext.IsServer or RunContext.IsEdit then
         local player =
             if RunContext.IsEdit
                 then Players.LocalPlayer
             elseif RunContext.IsServer
-                then Players:GetPlayerByUserId(userId)
+                then Players:GetPlayerByUserId(realUserId)
             else nil
 
         local cache: { PlayerData<T> } = if player
@@ -209,6 +216,7 @@ function EasyStore.Get<T>(self: Class<T>, target: (Player | number)?): PlayerDat
 
                 Owner = userId,
                 IsMock = isMock,
+                Player = player,
 
                 Updated = Signal.new(),
                 Loaded = Signal.new(),
@@ -284,6 +292,7 @@ function EasyStore.Get<T>(self: Class<T>, target: (Player | number)?): PlayerDat
         return cache[userId]
     else
         local data: PlayerData<T> = self._dataCache[userId]
+        local player = Players.LocalPlayer or nil
 
         if not data then
             data = setmetatable({
@@ -295,6 +304,7 @@ function EasyStore.Get<T>(self: Class<T>, target: (Player | number)?): PlayerDat
 
                 Owner = userId,
                 IsMock = isMock,
+                Player = player,
 
                 IsLoaded = false,
                 Loaded = Signal.new(),
@@ -375,8 +385,8 @@ function PlayerData.Patch<T>(self: PlayerData<T>, patchFunc: (edit: T) -> ()): P
         local replicate = self._server._netPatch:Server()
 
         if count > 0 then
-            if self.Owner then
-                replicate:Fire(self.Owner, changes)
+            if self.Player then
+                replicate:Fire(self.Player, changes)
             end
 
             DeltaTable.Apply(self.CurrentData :: any, changes, function (path, value)
@@ -519,8 +529,7 @@ end
 --- @return `boolean` Whether the profile was successfully released.
 function PlayerData.Release(self: PlayerData, force: boolean?): boolean
     if self:IsActive() then
-        local owner = self.Owner
-        local player = Players:GetPlayerByUserId(owner)
+        local player = self.Player
 
         if player and player:IsDescendantOf(game) then
             if force then
@@ -589,7 +598,8 @@ function EasyStore.Start<T>(self: Class<T>): Trove
         end
 
         local function onPlayerRemoving(player: Player)
-            local data: PlayerData<T> = self._dataCache[player.UserId]
+            local userId = UserId.Get(player)
+            local data: PlayerData<T> = self._dataCache[userId]
 
             if data then
                 data:Save()
@@ -618,7 +628,7 @@ function EasyStore.Start<T>(self: Class<T>): Trove
             local promises = {}
 
             for userId, data in pairs(self._dataCache) do
-                local promise = data:Save()
+                local promise = data:Save(true)
                     :andThen(function ()
                         free(data)
                     end)
@@ -637,16 +647,15 @@ function EasyStore.Start<T>(self: Class<T>): Trove
 
         init:On(function (data: LazyTable)
             myData.CurrentData = data :: any
-
+            myData.Loaded:FireDeferred(true)
             myData.IsLoaded = true
-            myData.Loaded:Fire(true)
         end)
 
         patch:On(function (patch: LazyTable)
             local myData = self:Get()
 
             DeltaTable.Apply(myData.CurrentData :: any, patch, function (path, value)
-                myData.Updated:Fire({
+                myData.Updated:FireDeferred({
                     Path = table.concat(path, "/"),
                     Value = value,
                 })
@@ -676,13 +685,14 @@ end
 ---     config: {
 ---         MockDataStoreService: DataStoreService?,
 ---         AutoSaveInterval: number?,
+---         AllowMockSave: boolean?,
 ---     }?
 --- ) -> Class<Default>
 --- -------------------------------------------------
 --- ```
---- Creates a new EasyStore instance using the specified DataStore name, provided default data structure, and optional configuration.
+--- Creates a new EasyStore instance using the specified `DataStore` name, provided default data structure, and optional configuration.
 --- * Make sure to call `EasyStore:Start()` on the returned instance to initialize it!
---- @param storeName The name of the DataStore to use.
+--- @param storeName The name of the `DataStore` to use.
 --- @param default A dictionary describing the default data structure for new players, and the general type shape of the data through Luau's type system.
 --- @param config Optional configuration for the EasyStore instance.
 --- @param config.MockDataStoreService An optional mock `DataStoreService` to use instead of the real one. Defaults to `game:GetService("DataStoreService")`.
@@ -711,6 +721,7 @@ local function create<Default>(storeName: string, default: Default, config: Conf
         _netInit = netInit,
         _netPatch = netPatch,
         _netRequest = netRequest,
+        _allowMockSave = config and config.AllowMockSave or false,
 
         _dataStoreName = storeName,
         _dataStoreService = dataStoreService,

@@ -3,13 +3,17 @@ local Squash = require(Shared.Squash)
 
 local PropSquash = require(script.PropSquash)
 local ArraySquash = require(Shared.ArraySquash)
+local DeferredPatcher = require(script.DeferredPatcher)
+
+local AssetService = game:GetService("AssetService")
 local ReflectionService = game:GetService("ReflectionService")
 
-local AllowList = require(script.AllowList) :: {
+local Filters = require(script.Filters) :: {
     [string]: { -- Class
-        [string]: true -- Property
+        [string]: boolean -- [Property]: Allow/Ignore
     }
 }
+
 local Accumulated = ArraySquash.Accumulated
 local AccI32 = Accumulated.I32
 
@@ -89,24 +93,47 @@ type ReflectedClasses = { ReflectedClass }
 ---------------------------------------------------------------------------------------
 
 local propSetters = {} :: {
-    [string]: (Instance, any) -> ()
+    [string]: {
+        [string]: (Instance, any) -> ()
+    }
 }
 
 local propCache = {} :: {
     [string]: ReflectedProperties
 }
 
-propSetters.Tags = function (inst: Instance, tags: { string })
-    for i, tag in tags do
-        inst:AddTag(tag)
+propSetters.Instance = {
+    Tags = function (inst: Instance, tags: { string })
+        for i, tag in tags do
+            inst:AddTag(tag)
+        end
+    end,
+    
+    Attributes = function (inst: Instance, attributes: { [string]: any })
+        for name, value in attributes do
+            inst:SetAttribute(name, value)
+        end
     end
-end
+}
 
-propSetters.Attributes = function (inst: Instance, attributes: { [string]: any })
-    for name, value in attributes do
-        inst:SetAttribute(name, value)
-    end
-end
+propSetters.MeshPart = {
+    MeshId = function (inst: MeshPart, value: string)
+        local meshContent = Content.fromUri(value)
+        DeferredPatcher.PatchMeshPart(inst, "MeshContent", meshContent)
+    end,
+
+    FluidFidelity = function (inst: MeshPart, value: Enum.FluidFidelity)
+        DeferredPatcher.PatchMeshPart(inst, "FluidFidelity", value)
+    end,
+
+    RenderFidelity = function (inst: MeshPart, value: Enum.RenderFidelity)
+        DeferredPatcher.PatchMeshPart(inst, "RenderFidelity", value)
+    end,
+
+    CollisionFidelity = function (inst: MeshPart, value: Enum.CollisionFidelity)
+        DeferredPatcher.PatchMeshPart(inst, "CollisionFidelity", value)
+    end,
+}
 
 local function getProperties(className: string): ReflectedProperties
     local props = propCache[className]
@@ -120,27 +147,22 @@ local function getProperties(className: string): ReflectedProperties
 end
 
 local function canSerialize(prop: ReflectedProperty)
+    local name = prop.Name
+    local owner = prop.Owner
+    local override = Filters[owner] and Filters[owner][name]
+
+    if override ~= nil then
+        return override
+    end
+
     local display = prop.Display
     local permits = prop.Permits
 
-    if not permits.Write then
-        return false
-    end
+    local serialize = permits.Write ~= nil
+        and not (display and display.DeprecationMessage)
+        and prop.Serialized
 
-    if display and display.DeprecationMessage then
-        return false
-    end
-
-    if not prop.Serialized then
-        local owner = prop.Owner
-        local allowed = AllowList[owner] and AllowList[owner][prop.Name]
-
-        if not allowed then
-            return false
-        end
-    end
-
-    return true
+    return serialize
 end
 
 local function serialize(root: Instance): buffer
@@ -378,7 +400,15 @@ local function deserialize(buf: buffer): Instance
         local objIds = AccI32.des(cursor)
 
         for i, id in objIds do
-            objects[id] = Instance.new(className)
+            local success, object = pcall(function ()
+                return Instance.new(className)
+            end)
+
+            if success then
+                objects[id] = object
+            else
+                warn("ModelSquash - Could not create instance of class:", className, "Error:", object)
+            end
         end
 
         classMap[classIndex] = {
@@ -399,7 +429,6 @@ local function deserialize(buf: buffer): Instance
         local classInfo = classMap[classIndex]
         local objectIds = classInfo.ObjectIds
 
-        local setter = propSetters[propName]
         local ok, result = PropSquash.DecompressArray(cursor, typeName)
         local values = ok and result or {}
 
@@ -407,8 +436,22 @@ local function deserialize(buf: buffer): Instance
             local inst = objects[objectId]
             local value = values[j]
 
+            if not inst then
+                warn("ModelSquash - Could not find instance for objectId:", objectId, "Class:", classInfo.Name)
+                continue
+            end
+
             if typeName == "Ref" then
                 value = objects[value]
+            end
+
+            local setter
+
+            for name, setters in propSetters do
+                if inst:IsA(name) and setters[propName] then
+                    setter = setters[propName]
+                    break
+                end
             end
 
             if setter then
