@@ -4,8 +4,6 @@ local Squash = require(Shared.Squash)
 local PropSquash = require(script.PropSquash)
 local ArraySquash = require(Shared.ArraySquash)
 local DeferredPatcher = require(script.DeferredPatcher)
-
-local AssetService = game:GetService("AssetService")
 local ReflectionService = game:GetService("ReflectionService")
 
 local Filters = require(script.Filters) :: {
@@ -34,64 +32,6 @@ type PROP = {
     Values: { any },
 }
 
----------------------------------------------------------------------------------------
--- FIXME BEGIN: Remove these once Luau LSP properly grabs these type declarations
-
-type ReflectionType = {
-    EngineType: string,
-    ScriptType: string?,
-    EnumType: string?,
-    InstanceType: string?
-}
-
-type ReflectedProperty = {
-    Name: string,
-    Owner: string,
-    Serialized: boolean,
-
-    Type: ReflectionType,
-    ContentType: Enum.AssetType?,
-    -- DefaultValue: any,
-    -- MinValue: number?,
-    -- MaxValue: number?
-
-    Display: {
-        Category: string,
-        DeprecationMessage: string?,
-        LayoutOrder: number,
-    }?,
-
-    Permits: {
-        Read: SecurityCapabilities?,
-        ReadParallel: SecurityCapabilities?,
-        Write: SecurityCapabilities?,
-        WriteParallel: SecurityCapabilities?,
-    },
-}
-
-type ReflectedClass = {
-    Name: string,
-    Superclass: string?,
-    Subclasses: { string },
-
-    Display: {
-        Category: string,
-        DeprecationMessage: string?,
-        LayoutOrder: number,
-    }?,
-
-    Permits: {
-        GetService: SecurityCapabilities?,
-        New: SecurityCapabilities?,
-    }
-}
-
-type ReflectedProperties = { ReflectedProperty }
-type ReflectedClasses = { ReflectedClass }
-
--- FIXME END
----------------------------------------------------------------------------------------
-
 local propSetters = {} :: {
     [string]: {
         [string]: (Instance, any) -> ()
@@ -99,7 +39,7 @@ local propSetters = {} :: {
 }
 
 local propCache = {} :: {
-    [string]: ReflectedProperties
+    [string]: { ReflectedProperty }
 }
 
 propSetters.Instance = {
@@ -135,7 +75,7 @@ propSetters.MeshPart = {
     end,
 }
 
-local function getProperties(className: string): ReflectedProperties
+local function getProperties(className: string): { ReflectedProperty }
     local props = propCache[className]
 
     if props == nil then
@@ -149,7 +89,7 @@ end
 local function canSerialize(prop: ReflectedProperty)
     local name = prop.Name
     local owner = prop.Owner
-    local override = Filters[owner] and Filters[owner][name]
+    local override = owner and Filters[owner] and Filters[owner][name]
 
     if override ~= nil then
         return override

@@ -8,6 +8,7 @@ local Promise = require(Shared.Promise)
 local RunContext = require(Shared.RunContext)
 
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 local MarketplaceService = game:GetService("MarketplaceService")
 
 type Promise = Promise.Class
@@ -187,14 +188,32 @@ task.spawn(function()
             continue
         end
 
-        local key = `{entry.InfoType.Name}:{entry.Id}`
+        local key = `{entry.InfoType.Name}_{entry.Id}`
         productInfoQueued[key] = nil
+
+        -- In case of server authority, use string values to cache product info locally on the server.
+        local cache = script:QueryDescendants(`StringValue #{key}`)
+
+        if #cache > 0 then
+            local cached = cache[1]
+            assert(cached:IsA("StringValue"))
+
+            local result = HttpService:JSONDecode(cached.Value)
+            entry.Resolve(result)
+            
+            continue
+        end
 
         local ok, result = pcall(function ()
             return MarketplaceService:GetProductInfoAsync(entry.Id, entry.InfoType)
         end)
 
         if ok then
+            local cache = Instance.new("StringValue")
+            cache.Value = HttpService:JSONEncode(result)
+            cache.Name = key
+            cache.Parent = script
+
             entry.Resolve(result)
         else
             entry.Attempts += 1
