@@ -54,6 +54,34 @@ local purchaseValidators = {} :: {
     [string]: (player: Player, id: any, infoType: Enum.InfoType) -> boolean,
 }
 
+export type ReceiptInfo = {
+    PurchaseId: string,
+    PlayerId: number,
+    PlaceIdWherePurchased: number,
+    ReceiptType: Enum.ReceiptType,
+    CurrencySpent: number,
+
+    -- Only present for Enum.ReceiptType.DeveloperProduct receipts.
+    CurrencyType: Enum.CurrencyType?,
+    ProductId: number?,
+
+    -- Only present for Robux transfer receipts.
+    TransferRequestId: string?,
+}
+
+local receiptHandlers = {} :: {
+    [number]: {
+        Callback: (info: ReceiptInfo) -> Enum.ReceiptDecision,
+        Connection: RBXScriptConnection,
+    }
+}
+
+local grantPurchase: (
+    player: Player,
+    id: any,
+    infoType: Enum.InfoType
+) -> ()
+
 local function addMockEconomyCheck(id: string, check: () -> boolean)
     mockEconomyChecks[id] = check
 end
@@ -253,6 +281,7 @@ local PROMPT_PURCHASE = Network.ReliableEvent("Marketplace_PromptPurchase", func
 end)
 
 local promptPurchaseFinished = Signal.new() :: Signal<Player, any, Enum.InfoType>
+local productGranted = Signal.new() :: Signal<Player, number, ReceiptInfo>
 
 local function getOwnershipRecord<T>(player: Player, id: T, infoType: Enum.InfoType?): OwnershipRecord
     local infoType = infoType or Enum.InfoType.Asset
@@ -362,6 +391,78 @@ local function prefetchProductInfo(id: number, infoType: Enum.InfoType?): Promis
     return promiseProductInfo(id, infoType, false)
 end
 
+local function addReceiptHandler(productId: number, handler: (info: ReceiptInfo) -> Enum.ReceiptDecision)
+    assert(RunContext.IsServer, "Receipt handlers can only be added from the server!")
+    local activeHandler = receiptHandlers[productId]
+
+    if activeHandler then
+        activeHandler.Connection:Disconnect()
+    end
+
+    -- Wrap the handler so successful receipts notify the rest of the module
+    -- (ProductGranted, PromptPurchaseFinished, client replication).
+    local function onReceipt(info: ReceiptInfo): Enum.ReceiptDecision
+        local decision = handler(info)
+
+        if decision == Enum.ReceiptDecision.Processed then
+            local player = Players:GetPlayerByUserId(info.PlayerId)
+
+            if player then
+                productGranted:Fire(player, productId, info)
+                grantPurchase(player, productId, Enum.InfoType.Product)
+            end
+        end
+
+        return decision
+    end
+
+    receiptHandlers[productId] = {
+        Callback = onReceipt,
+        Connection = MarketplaceService:BindReceiptHandler(Enum.ReceiptType.DeveloperProduct, onReceipt, { productId })
+    }
+end
+
+local function removeReceiptHandler(productId: number)
+    assert(RunContext.IsServer, "Receipt handlers can only be removed from the server!")
+    local activeHandler = receiptHandlers[productId]
+
+    if activeHandler then
+        activeHandler.Connection:Disconnect()
+        receiptHandlers[productId] = nil
+    end
+end
+
+-- Simulates a developer product receipt when the economy is mocked (or in edit mode),
+-- routing it through the registered receipt handler like a real purchase would be.
+local function processMockReceiptAsync(player: Player, productId: number)
+    local activeHandler = receiptHandlers[productId]
+
+    local info: ReceiptInfo = {
+        PurchaseId = `MOCK_` .. HttpService:GenerateGUID(false),
+        PlayerId = player.UserId,
+        PlaceIdWherePurchased = game.PlaceId,
+        ReceiptType = Enum.ReceiptType.DeveloperProduct,
+        CurrencySpent = 0,
+        ProductId = productId,
+        CurrencyType = Enum.CurrencyType.Robux,
+    }
+
+    if activeHandler then
+        -- Wrapped callback has productGranted and grantPurchase calls, so we just need to check the decision.
+        local ok, decision = xpcall(activeHandler.Callback, function (err)
+            warn("ERROR PROCESSING MOCK RECEIPT FOR PRODUCT:", productId, "-", err, debug.traceback())
+        end, info)
+
+        if ok and decision ~= Enum.ReceiptDecision.Processed then
+            warn("MOCK RECEIPT NOT YET PROCESSED FOR PRODUCT:", productId)
+        end
+    else
+        -- No receipt handler registered; grant directly.
+        productGranted:Fire(player, productId, info)
+        grantPurchase(player, productId, Enum.InfoType.Product)
+    end
+end
+
 local function bulkResolveOwnership(player: Player, ownershipList: { VapidOwnership }): Promise
     local n = #ownershipList
     local promises = table.create(n) :: { Promise }
@@ -390,7 +491,7 @@ local function bulkResolveOwnership(player: Player, ownershipList: { VapidOwners
     end)
 end
 
-local function grantPurchase<T>(player: Player, id: T, infoType: Enum.InfoType)
+function grantPurchase(player: Player, id: any, infoType: Enum.InfoType)
     local data = getOwnershipRecord(player, id, infoType)
 
     if data.Changed then
@@ -406,7 +507,11 @@ local function grantPurchase<T>(player: Player, id: T, infoType: Enum.InfoType)
         server:FireAll(player, id, infoType)
     end
 
-    data.Promise = Promise.resolve(true)
+    -- Developer products are consumable and never owned, so don't cache ownership.
+    data.Promise = if infoType ~= Enum.InfoType.Product 
+        then Promise.resolve(true)
+        else nil
+
     promptPurchaseFinished:Fire(player, id, infoType)
 end
 
@@ -434,7 +539,12 @@ local function promptPurchase(id: any, infoType: Enum.InfoType?, player: Player?
             warn("MOCKING PURCHASE IN EDIT MODE", id, infoType, "FOR PLAYER", player)
         end
 
-        grantPurchase(player, id, infoType or Enum.InfoType.Asset)
+        if infoType == Enum.InfoType.Product then
+            task.spawn(processMockReceiptAsync, player, id)
+        else
+            grantPurchase(player, id, infoType or Enum.InfoType.Asset)
+        end
+
         return
     end
     
@@ -521,6 +631,7 @@ return table.freeze({
     GetProductInfo = promiseProductInfo,
     PrefetchProductInfo = prefetchProductInfo,
 
+    PromptPurchase = promptPurchase,
     BulkResolveOwnership = bulkResolveOwnership,
     GetOwnershipChangedSignal = getOwnershipChangedSignal,
 
@@ -529,7 +640,10 @@ return table.freeze({
 
     AddMockEconomyCheck = addMockEconomyCheck,
     RemoveMockEconomyCheck = removeMockEconomyCheck,
+
+    AddReceiptHandler = addReceiptHandler,
+    RemoveReceiptHandler = removeReceiptHandler,
     
-    PromptPurchase = promptPurchase,
     PromptPurchaseFinished = promptPurchaseFinished,
+    ProductGranted = productGranted,
 })
