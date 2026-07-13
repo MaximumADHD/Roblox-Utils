@@ -5,20 +5,22 @@ local ASSET_PROXY = "http://localhost:20326/asset?id=%i"
 local RobloxMesh = {}
 RobloxMesh.__index = RobloxMesh
 
+type Tangent = {
+    Vector: Vector3,
+    Sign: number,
+}
+
+type Color = {
+    Tint: Color3,
+    Alpha: number,
+}
+
 export type Vertex = {
     Position: Vector3,
+    Tangent: Tangent?,
     Normal: Vector3,
+    Color: Color,
     UV: Vector2,
-
-    Tangent: {
-        Vector: Vector3,
-        Sign: number,
-    }?,
-
-    Color: {
-        Tint: Color3,
-        Alpha: number,
-    },
 
     Weights: {
         [Bone]: number,
@@ -145,7 +147,9 @@ local FACS_SHORT_NAME_MAP = table.freeze({
     r_NW = "RightNoseWrinkler",
     r_OBR = "RightOuterBrowRaiser",
     r_ULR = "RightUpperLipRaiser",
-})
+}) :: {
+    [string]: string
+}
 
 local DRACO_NORMAL_ID = 1
 local DRACO_TANGENT_ID = 3
@@ -257,10 +261,10 @@ local function readAsciiMesh(file: string): Class
     return setmetatable({
         LODs = { faces },
         Verts = verts,
-    }, RobloxMesh)
+    }, RobloxMesh) :: Class
 end
 
--- Reads vertex data from the buffer for versions 2.xx to 6.xx
+-- Reads vertex data from the buffer
 local function readVerts(buf: Buffer, numVerts: number, hasColor: boolean)
     local verts = {}
 
@@ -309,7 +313,7 @@ local function readVerts(buf: Buffer, numVerts: number, hasColor: boolean)
     return verts
 end
 
---- Reads face data from the buffer for versions 2.xx to 6.xx
+--- Reads face data from the buffer
 local function readFaces(buf: Buffer, numFaces: number)
     local faces = {}
 
@@ -343,7 +347,7 @@ end
 
 --- Reads the skinning data for each vertex, which indicates which bones affect each vertex and by how much.
 local function readSkinning(buf: Buffer, count: number)
-    local skinning = table.create(count)
+    local skinning = table.create<<SkinSet>>(count)
 
     for i = 1, count do
         local bones = readBytes(buf, 4)
@@ -400,7 +404,7 @@ end
 
 --- Reads the bone hierarchy from the buffer, including the transform for each bone and its parent-child relationships.
 local function readBones(buf: Buffer, count: number): { Bone }
-    local bones: { Bone } = table.create(count)
+    local bones = table.create<<Bone>>(count)
 
     for i = 1, count do
         local bone = Instance.new("Bone")
@@ -453,12 +457,12 @@ end
 --- Remaps the face arrays into groups based on the LOD offset ranges.
 local function mapLodOffsets(faces: {{number}}, lodOffsets: { number })
     local numLodOffsets = #lodOffsets
-    local lods = table.create(numLodOffsets - 1)
+    local lods = table.create<<{{number}}>>(numLodOffsets - 1)
 
     for L = 1, numLodOffsets - 1 do
         local lodStart = lodOffsets[L]
         local lodEnd = lodOffsets[L + 1]
-        local lod = table.create(lodEnd - lodStart)
+        local lod = table.create<<{number}>>(lodEnd - lodStart)
 
         for i = lodStart + 1, lodEnd do
             local face = faces[i]
@@ -515,14 +519,14 @@ local function readFACS(buf: Buffer, boneMap: { [string]: Bone }): FacsData
         end
     end
 
-    local transform = table.create(6)
+    local transform = table.create<<{number}>>(6)
 
     for i = 1, 6 do
         local format = readU16(buf)
         local rows = readU32(buf)
         local cols = readU32(buf)
 
-        local matrix = table.create(rows * cols)
+        local matrix = table.create<<number>>(rows * cols)
         transform[i] = matrix
 
         if format == 1 then
@@ -550,10 +554,23 @@ local function readFACS(buf: Buffer, boneMap: { [string]: Bone }): FacsData
 
     local numPoses = #faceControlNames + numTwoPoseCorrectives + numThreePoseCorrectives
     local poseNames = table.clone(faceControlNames)
-    local poses = table.create(numPoses)
+    
+    local poses = table.create<<{
+        [string]: Transform,
+    }>>(numPoses)
 
-    local twoPoseCorrectives = table.create(numTwoPoseCorrectives)
-    local threePoseCorrectives = table.create(numThreePoseCorrectives)
+    local twoPoseCorrectives = table.create<<{
+        Pose: number,
+        IndexA: number,
+        IndexB: number,
+    }>>(numTwoPoseCorrectives)
+
+    local threePoseCorrectives = table.create<<{
+        Pose: number,
+        IndexA: number,
+        IndexB: number,
+        IndexC: number,
+    }>>(numThreePoseCorrectives)
 
     for i = 1, numTwoPoseCorrectives do
         local nextIndex = #poseNames + 1
@@ -601,7 +618,7 @@ local function readFACS(buf: Buffer, boneMap: { [string]: Bone }): FacsData
         local begin = ((row - 1) * numPoses)
 
         for col = 1, numPoses do
-            local pose = poses[col] or {}
+            local pose = poses[col]
             local i = begin + col
 
             if begin == 0 then
@@ -663,7 +680,7 @@ local function readBinaryMesh(buf: Buffer, meshVersion: number): Class
     skip(buf, 2) -- u16 headerSize
 
     if meshVersion >= 4 then
-        local _lodType = readU16(buf)
+        skip(buf, 2) -- u16 lodType
 
         numVerts = readU32(buf)
         numFaces = readU32(buf)
@@ -696,11 +713,11 @@ local function readBinaryMesh(buf: Buffer, meshVersion: number): Class
         hasColor = (vertSize > 36)
     end
 
-    local bones: { Bone } = table.create(numBones)
-    local verts: { Vertex } = table.create(numVerts)
+    local bones = table.create<<Bone>>(numBones)
+    local verts = table.create<<Vertex>>(numVerts)
 
-    local faces: {{ number }} = table.create(numFaces)
-    local lodOffsets: { number } = table.create(numLODs)
+    local faces = table.create<<Face>>(numFaces)
+    local lodOffsets = table.create<<number>>(numLODs)
 
     local skinning: { SkinSet } = {}
 
@@ -746,7 +763,7 @@ local function readBinaryMesh(buf: Buffer, meshVersion: number): Class
         LODs = lods,
         Bones = bones,
         Verts = verts,
-    }, RobloxMesh)
+    }, RobloxMesh) :: Class
 end
 
 --- Reads a chunk mesh between versions 6.xx and 7.xx
@@ -787,11 +804,11 @@ local function readChunkMesh(buf: Buffer): Class
                 local numPoints = dracoMesh.NumPoints
 
                 -- Collect vertex data
-                local uvs = table.create(numPoints)
-                local norms = table.create(numPoints)
-                local colors = table.create(numPoints)
-                local points = table.create(numPoints)
-                local tangents = table.create(numPoints)
+                local uvs = table.create<<Vector2>>(numPoints)
+                local norms = table.create<<Vector3>>(numPoints)
+                local colors = table.create<<Color>>(numPoints)
+                local points = table.create<<Vector3>>(numPoints)
+                local tangents = table.create<<Tangent>>(numPoints)
 
                 for x, y, z in dracoMesh:ComponentsOf("Position") do
                     local point = Vector3.new(x, y, z)
@@ -828,7 +845,7 @@ local function readChunkMesh(buf: Buffer): Class
                 end
 
                 -- Build verts
-                verts = table.create(numPoints)
+                verts = table.create<<Vertex>>(numPoints)
 
                 for i = 1, numPoints do
                     verts[i] = {
@@ -844,9 +861,9 @@ local function readChunkMesh(buf: Buffer): Class
                 end
 
                 -- Build faces
-                local numFaces = dracoMesh.NumFaces
                 local faceIds = dracoMesh.Faces
-                faces = table.create(numFaces)
+                local numFaces = dracoMesh.NumFaces
+                faces = table.create<<Face>>(numFaces)
 
                 for i = 1, numFaces * 3, 3 do
                     local a, b, c = table.unpack(faceIds, i, i + 2)
@@ -897,7 +914,7 @@ local function readChunkMesh(buf: Buffer): Class
         LODs = lods,
         Bones = bones,
         Verts = verts,
-    }, RobloxMesh)
+    }, RobloxMesh) :: Class
 end
 
 --- Main entry point for reading a mesh from a binary string. Determines the version and format of the mesh and dispatches to the appropriate reader function.
@@ -1256,9 +1273,9 @@ function RobloxMesh.ToEditableMesh(self: Class, lod: number?): EditableMesh
 
         vertData[i] = {
             UV = uvId,
+            Color = colorId,
             Normal = normalId,
             Position = vertexId,
-            Color = colorId,
         }
     end
 
@@ -1326,7 +1343,7 @@ function RobloxMesh.empty(): Class
     return setmetatable({
         LODs = { {} },
         Verts = {},
-    }, RobloxMesh)
+    }, RobloxMesh) :: Class
 end
 
 --- Sets the URL format for the asset web proxy used to fetch mesh data. 
