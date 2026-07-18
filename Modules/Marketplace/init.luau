@@ -14,106 +14,6 @@ local MarketplaceService = game:GetService("MarketplaceService")
 type Promise = Promise.Class
 type Signal<T...> = Signal.Signal<T...>
 
-type OwnershipRecord = {
-    Promise: Promise?,
-    Changed: Signal<boolean>?,
-}
-
-local ownership = {} :: {
-    [Player]: {
-        [string]: OwnershipRecord,
-    },
-}
-
-local productInfo = {} :: {
-    [string]: Promise,
-}
-
-local PRODUCT_INFO_RATE = 300 -- requests per minute
-local PRODUCT_INFO_INTERVAL = 60 / PRODUCT_INFO_RATE
-local PRODUCT_INFO_MAX_RETRIES = 5
-local PRODUCT_INFO_RETRY_DELAY = 2
-
-type ProductInfoQueueEntry = {
-    Id: number,
-    InfoType: Enum.InfoType,
-    Attempts: number,
-    
-    Resolve: (any) -> (),
-    Reject: (any) -> (),
-}
-
-local productInfoQueue = {} :: { ProductInfoQueueEntry }
-local productInfoQueued = {} :: { [string]: ProductInfoQueueEntry }
-
-local mockEconomyChecks = {} :: {
-    [string]: () -> boolean,
-}
-
-local purchaseValidators = {} :: {
-    [string]: (player: Player, id: any, infoType: Enum.InfoType) -> boolean,
-}
-
-export type ReceiptInfo = {
-    PurchaseId: string,
-    PlayerId: number,
-    PlaceIdWherePurchased: number,
-    ReceiptType: Enum.ReceiptType,
-    CurrencySpent: number,
-
-    -- Only present for Enum.ReceiptType.DeveloperProduct receipts.
-    CurrencyType: Enum.CurrencyType?,
-    ProductId: number?,
-
-    -- Only present for Robux transfer receipts.
-    TransferRequestId: string?,
-}
-
-local receiptHandlers = {} :: {
-    [number]: {
-        Callback: (info: ReceiptInfo) -> Enum.ReceiptDecision,
-        Connection: RBXScriptConnection,
-    }
-}
-
-local grantPurchase: (
-    player: Player,
-    id: any,
-    infoType: Enum.InfoType
-) -> ()
-
-local function addMockEconomyCheck(id: string, check: () -> boolean)
-    mockEconomyChecks[id] = check
-end
-
-local function removeMockEconomyCheck(id: string)
-    mockEconomyChecks[id] = nil
-end
-
-local function addPurchaseValidator(id: string, validator: (player: Player, id: any, infoType: Enum.InfoType) -> boolean)
-    assert(RunContext.IsServer, "Purchase validators can only be added from the server!")
-    purchaseValidators[id] = validator
-end
-
-local function removePurchaseValidator(id: string)
-    assert(RunContext.IsServer, "Purchase validators can only be removed from the server!")
-    purchaseValidators[id] = nil
-end
-
-local function canMockEconomy()
-    if next(mockEconomyChecks) == nil then
-        return false
-    end
-
-    for i, check in mockEconomyChecks do
-        if not check() then
-            return false
-        end
-    end
-
-    return true
-end
-
 export type Ownership = {
     Id: number,
     InfoType: Enum.InfoType,
@@ -149,41 +49,165 @@ export type ProductInfo = {
     TargetId: number,
 }
 
-local playerOwnsItem = Promise.promisify(function(player: Player, itemId: any, infoType: Enum.InfoType?)
-    local userId, isMock = UserId.Get(player)
+type OwnershipRecord = {
+    Promise: Promise?,
+    Changed: Signal<boolean>?,
+}
 
-    if userId < 1 then
-        return RunContext.IsStudio
+type PendingRequest = {
+    Resolve: (any) -> (),
+    Reject: (any) -> (),
+}
+
+export type ReceiptInfo = {
+    PurchaseId: string,
+    PlayerId: number,
+    PlaceIdWherePurchased: number,
+    ReceiptType: Enum.ReceiptType,
+    CurrencySpent: number,
+
+    -- Only present for Enum.ReceiptType.DeveloperProduct receipts.
+    CurrencyType: Enum.CurrencyType?,
+    ProductId: number?,
+
+    -- Only present for Robux transfer receipts.
+    TransferRequestId: string?,
+}
+
+local ownership = {} :: {
+    [Player]: {
+        [string]: OwnershipRecord,
+    },
+}
+
+local productInfo = {} :: {
+    [string]: Promise,
+}
+
+-- Client-side requests awaiting a response from the server.
+local pendingOwnershipRequests = {} :: {
+    [string]: PendingRequest
+}
+
+local pendingProductInfoRequests = {} :: {
+    [string]: PendingRequest
+}
+
+local PRODUCT_INFO_RATE = 300 -- requests per minute
+local PRODUCT_INFO_INTERVAL = 60 / PRODUCT_INFO_RATE
+local PRODUCT_INFO_MAX_RETRIES = 5
+local PRODUCT_INFO_RETRY_DELAY = 2
+
+type ProductInfoQueueEntry = {
+    Id: number,
+    Attempts: number,
+    InfoType: Enum.InfoType,
+    
+    Resolve: (any) -> (),
+    Reject: (any) -> (),
+}
+
+local productInfoQueue = {} :: { ProductInfoQueueEntry }
+
+local productInfoQueued = {} :: {
+    [string]: ProductInfoQueueEntry
+}
+
+local mockEconomyChecks = {} :: {
+    [string]: () -> boolean,
+}
+
+local purchaseValidators = {} :: {
+    [string]: (player: Player, id: any, infoType: Enum.InfoType) -> boolean,
+}
+
+local productOwnershipCheckers = {} :: {
+    [number]: (player: Player, productId: number) -> boolean,
+}
+
+
+local receiptHandlers = {} :: {
+    [number]: {
+        Callback: (info: ReceiptInfo) -> Enum.ReceiptDecision,
+        Connection: RBXScriptConnection,
+    }
+}
+
+local grantPurchase: (
+    player: Player,
+    id: any,
+    infoType: Enum.InfoType
+) -> ()
+
+local function setMockEconomyCheck(id: string, check: (() -> boolean)?)
+    if check then
+        mockEconomyChecks[id] = check
+    else
+        mockEconomyChecks[id] = nil
+    end
+end
+
+local function setPurchaseValidator(id: string, validator: ((player: Player, id: any, infoType: Enum.InfoType) -> boolean)?)
+    assert(RunContext.IsServer, "Purchase validators can only be added from the server!")
+
+    if validator then
+        purchaseValidators[id] = validator
+    else
+        purchaseValidators[id] = nil
+    end
+end
+
+local function setProductOwnershipChecker(productId: number, checker: ((player: Player, productId: number) -> boolean)?)
+    assert(RunContext.IsServer, "Product ownership checker can only be set from the server!")
+    
+    if checker then
+        productOwnershipCheckers[productId] = checker
+    else
+        productOwnershipCheckers[productId] = nil
+    end
+end
+
+local function canMockEconomy()
+    if next(mockEconomyChecks) == nil then
+        return false
     end
 
-    if infoType == Enum.InfoType.Subscription then
-        if isMock then
-            return true
-        else
-            local status = MarketplaceService:GetUserSubscriptionStatusAsync(player, itemId)
-            return status.IsSubscribed
+    for i, check in mockEconomyChecks do
+        if not check() then
+            return false
         end
+    end
+
+    return true
+end
+
+local playerOwnsItem = Promise.promisify(function(player: Player, itemId: any, infoType: Enum.InfoType?)
+    local userId = UserId.Get(player)
+
+    if infoType == Enum.InfoType.Subscription then
+        local status = MarketplaceService:GetUserSubscriptionStatusAsync(player, itemId)
+        return status.IsSubscribed
     elseif infoType == Enum.InfoType.GamePass then
         return MarketplaceService:UserOwnsGamePassAsync(userId, itemId)
     elseif infoType == Enum.InfoType.Bundle then
-        if isMock then
-            return true
-        end
-
         return MarketplaceService:PlayerOwnsBundleAsync(player, itemId)
     elseif infoType == Enum.InfoType.Product then
+        -- Lazy "ownership" check for developer products. They aren't owned, but in events where the developer wants to
+        -- for example, check if a player has purchased a gifting product, they can register a custom checker for that id.
+        local checker = productOwnershipCheckers[itemId]
+
+        if checker then
+            return checker(player, itemId)
+        end
+
         return false
     else
-        if isMock then
-            return true
-        end
-        
         return MarketplaceService:PlayerOwnsAssetAsync(player, itemId)
     end
 end)
 
 local function enqueueProductInfoFetch(entry: ProductInfoQueueEntry, priority: boolean)
-    local key = `{entry.InfoType.Name}:{entry.Id}`
+    local key = `{entry.InfoType.Name}_{entry.Id}`
     local existing = productInfoQueued[key]
 
     if existing then
@@ -208,7 +232,13 @@ local function enqueueProductInfoFetch(entry: ProductInfoQueueEntry, priority: b
     end
 end
 
-task.spawn(function()
+task.spawn(function ()
+    if RunContext.IsClient and not RunContext.IsEdit then
+        -- Pure clients never call GetProductInfoAsync directly;
+        -- they request product info from the server instead.
+        return
+    end
+
     while task.wait(PRODUCT_INFO_INTERVAL) do
         local entry = table.remove(productInfoQueue, 1)
 
@@ -216,32 +246,15 @@ task.spawn(function()
             continue
         end
 
-        local key = `{entry.InfoType.Name}_{entry.Id}`
-        productInfoQueued[key] = nil
-
-        -- In case of server authority, use string values to cache product info locally on the server.
-        local cache = script:QueryDescendants(`StringValue #{key}`)
-
-        if #cache > 0 then
-            local cached = cache[1]
-            assert(cached:IsA("StringValue"))
-
-            local result = HttpService:JSONDecode(cached.Value)
-            entry.Resolve(result)
-            
-            continue
-        end
+        local cacheKey = `{entry.InfoType.Name}_{entry.Id}`
 
         local ok, result = pcall(function ()
             return MarketplaceService:GetProductInfoAsync(entry.Id, entry.InfoType)
         end)
 
-        if ok then
-            local cache = Instance.new("StringValue")
-            cache.Value = HttpService:JSONEncode(result)
-            cache.Name = key
-            cache.Parent = script
+        productInfoQueued[cacheKey] = nil
 
+        if ok then
             entry.Resolve(result)
         else
             entry.Attempts += 1
@@ -280,6 +293,34 @@ local PROMPT_PURCHASE = Network.ReliableEvent("Marketplace_PromptPurchase", func
     return id, infoType
 end)
 
+local REQUEST_PRODUCT_INFO = Network.ReliableEvent("Marketplace_RequestProductInfo", function (id: unknown, infoType: unknown)
+    assert(type(id) == "number")
+    assert(typeof(infoType) == "EnumItem" and infoType:IsA("InfoType"))
+    return id, infoType :: Enum.InfoType
+end)
+
+local PRODUCT_INFO_RESULT = Network.ReliableEvent("Marketplace_ProductInfoResult", function (id: unknown, infoType: unknown, ok: unknown, result: unknown)
+    assert(type(id) == "number")
+    assert(typeof(infoType) == "EnumItem" and infoType:IsA("InfoType"))
+    assert(type(ok) == "boolean")
+    return id, infoType :: Enum.InfoType, ok, result
+end)
+
+local REQUEST_OWNERSHIP = Network.ReliableEvent("Marketplace_RequestOwnership", function (userId: unknown, id: unknown, infoType: unknown)
+    assert(type(userId) == "number")
+    assert(id ~= nil)
+    assert(typeof(infoType) == "EnumItem" and infoType:IsA("InfoType"))
+    return userId, id, infoType :: Enum.InfoType
+end)
+
+local OWNERSHIP_RESULT = Network.ReliableEvent("Marketplace_OwnershipResult", function (userId: unknown, id: unknown, infoType: unknown, ok: unknown, owned: unknown)
+    assert(type(userId) == "number")
+    assert(id ~= nil)
+    assert(typeof(infoType) == "EnumItem" and infoType:IsA("InfoType"))
+    assert(type(ok) == "boolean")
+    return userId, id, infoType :: Enum.InfoType, ok, owned
+end)
+
 local promptPurchaseFinished = Signal.new() :: Signal<Player, any, Enum.InfoType>
 local productGranted = Signal.new() :: Signal<Player, number, ReceiptInfo>
 
@@ -292,7 +333,7 @@ local function getOwnershipRecord<T>(player: Player, id: T, infoType: Enum.InfoT
             return ownership[player]
         end)()
 
-    local key = `{infoType.Name}:{id}`
+    local key = `{infoType.Name}_{id}`
 
     local data = ownershipTable[key]
         or (function()
@@ -316,7 +357,43 @@ local function promiseOwnership(player: Player, id: number, infoType: Enum.InfoT
             return assert(data.Promise)
         end
 
-        local new = Promise.retryWithDelay(playerOwnsItem, 5, 2, player, id, infoType)
+        local resolvedInfoType = infoType or Enum.InfoType.Asset
+        local userId = UserId.Get(player)
+        local new: Promise
+
+        if RunContext.IsClient and not RunContext.IsEdit then
+            -- Ask the server, which dedupes requests through its own ownership cache.
+            local key = `{userId}_{resolvedInfoType.Name}_{id}`
+
+            new = Promise.new(function (resolve, reject, onCancel)
+                local pending: PendingRequest = {
+                    Resolve = resolve,
+                    Reject = reject
+                }
+
+                pendingOwnershipRequests[key] = pending
+
+                onCancel(function ()
+                    if pendingOwnershipRequests[key] == pending then
+                        pendingOwnershipRequests[key] = nil
+                    end
+                end)
+
+                local client = REQUEST_OWNERSHIP:Client()
+                client:Fire(userId, id, resolvedInfoType)
+            end)
+        else
+            new = Promise.retryWithDelay(playerOwnsItem, 5, 2, player, id, infoType)
+
+            if RunContext.IsServer and not RunContext.IsEdit then
+                -- Propagate successful server queries to the client so it never repeats them.
+                new:andThen(function (owned: boolean)
+                    local server = OWNERSHIP_RESULT:Server()
+                    server:Fire(player, userId, id, resolvedInfoType, true, owned)
+                end)
+            end
+        end
+
         data.Promise = new
 
         new:catch(function(err)
@@ -345,7 +422,7 @@ local function promiseProductInfo(id: number, infoType: Enum.InfoType?, priority
     end
 
     local resolvedInfoType = infoType or Enum.InfoType.Asset
-    local key = `{resolvedInfoType.Name}:{id}`
+    local key = `{resolvedInfoType.Name}_{id}`
     local existing = productInfo[key]
 
     if existing then
@@ -366,7 +443,25 @@ local function promiseProductInfo(id: number, infoType: Enum.InfoType?, priority
         return existing
     end
 
-    local new = Promise.new(function(resolve, reject)
+    local new = Promise.new(function(resolve, reject, onCancel)
+        if RunContext.IsClient and not RunContext.IsEdit then
+            -- Ask the server, which owns the GetProductInfoAsync queue. This joins any
+            -- in-flight server request instead of starting a duplicate query from the client.
+            local pending: PendingRequest = { Resolve = resolve, Reject = reject }
+            pendingProductInfoRequests[key] = pending
+
+            onCancel(function ()
+                if pendingProductInfoRequests[key] == pending then
+                    pendingProductInfoRequests[key] = nil
+                end
+            end)
+
+            local client = REQUEST_PRODUCT_INFO:Client()
+            client:Fire(id, resolvedInfoType)
+
+            return
+        end
+
         enqueueProductInfoFetch({
             Id = id,
             InfoType = resolvedInfoType,
@@ -391,17 +486,22 @@ local function prefetchProductInfo(id: number, infoType: Enum.InfoType?): Promis
     return promiseProductInfo(id, infoType, false)
 end
 
-local function addReceiptHandler(productId: number, handler: (info: ReceiptInfo) -> Enum.ReceiptDecision)
-    assert(RunContext.IsServer, "Receipt handlers can only be added from the server!")
+local function setReceiptHandler(productId: number, handler: ((info: ReceiptInfo) -> Enum.ReceiptDecision)?)
+    assert(RunContext.IsServer, "Receipt handlers can only be set from the server!")
     local activeHandler = receiptHandlers[productId]
 
     if activeHandler then
         activeHandler.Connection:Disconnect()
     end
 
+    if not handler then
+        receiptHandlers[productId] = nil
+        return
+    end
+
     -- Wrap the handler so successful receipts notify the rest of the module
     -- (ProductGranted, PromptPurchaseFinished, client replication).
-    local function onReceipt(info: ReceiptInfo): Enum.ReceiptDecision
+    local function onHandleReceipt(info: ReceiptInfo): Enum.ReceiptDecision
         local decision = handler(info)
 
         if decision == Enum.ReceiptDecision.Processed then
@@ -409,7 +509,6 @@ local function addReceiptHandler(productId: number, handler: (info: ReceiptInfo)
 
             if player then
                 productGranted:Fire(player, productId, info)
-                grantPurchase(player, productId, Enum.InfoType.Product)
             end
         end
 
@@ -417,19 +516,14 @@ local function addReceiptHandler(productId: number, handler: (info: ReceiptInfo)
     end
 
     receiptHandlers[productId] = {
-        Callback = onReceipt,
-        Connection = MarketplaceService:BindReceiptHandler(Enum.ReceiptType.DeveloperProduct, onReceipt, { productId })
+        Callback = onHandleReceipt,
+
+        Connection = MarketplaceService:BindReceiptHandler(
+            Enum.ReceiptType.DeveloperProduct,
+            onHandleReceipt,
+            { productId }
+        )
     }
-end
-
-local function removeReceiptHandler(productId: number)
-    assert(RunContext.IsServer, "Receipt handlers can only be removed from the server!")
-    local activeHandler = receiptHandlers[productId]
-
-    if activeHandler then
-        activeHandler.Connection:Disconnect()
-        receiptHandlers[productId] = nil
-    end
 end
 
 -- Simulates a developer product receipt when the economy is mocked (or in edit mode),
@@ -563,7 +657,7 @@ if RunContext.IsEdit then
     local mockEconomy = workspace:GetAttribute("EditModeMockEconomy")
 
     if mockEconomy then
-        addMockEconomyCheck("__EditMode", function ()
+        setMockEconomyCheck("__EditMode", function ()
             return true
         end)
     end
@@ -581,6 +675,36 @@ if RunContext.IsServer or RunContext.IsEdit then
         end
 
         promptPurchase(id, infoType, player)
+    end)
+
+    local productInfoServer = REQUEST_PRODUCT_INFO:Server()
+
+    productInfoServer:On(function (player: Player, id: number, infoType: Enum.InfoType)
+        local resultServer = PRODUCT_INFO_RESULT:Server()
+
+        promiseProductInfo(id, infoType, true):andThen(function (result)
+            resultServer:Fire(player, id, infoType, true, result)
+        end):catch(function (err)
+            resultServer:Fire(player, id, infoType, false, tostring(err))
+        end)
+    end)
+
+    local ownershipServer = REQUEST_OWNERSHIP:Server()
+
+    ownershipServer:On(function (player: Player, userId: number, id: any, infoType: Enum.InfoType)
+        local resultServer = OWNERSHIP_RESULT:Server()
+        local target = Players:GetPlayerByUserId(userId)
+
+        if not target then
+            resultServer:Fire(player, userId, id, infoType, false, "Player not found")
+            return
+        end
+
+        promiseOwnership(target, id, infoType):andThen(function (owned)
+            resultServer:Fire(player, userId, id, infoType, true, owned)
+        end):catch(function (err)
+            resultServer:Fire(player, userId, id, infoType, false, tostring(err))
+        end)
     end)
 
     local function createPurchaseFinishedCallback(infoType: Enum.InfoType)
@@ -622,8 +746,62 @@ if RunContext.IsServer or RunContext.IsEdit then
 
     Players.PlayerRemoving:Connect(onPlayerRemoving)
 elseif not RunContext.IsEdit then
-    local client = GRANT_PURCHASE:Client()
-    client:On(grantPurchase)
+    local productInfoClient = PRODUCT_INFO_RESULT:Client()
+    local grantPurchaseClient = GRANT_PURCHASE:Client()
+    local ownershipClient = OWNERSHIP_RESULT:Client()
+
+    productInfoClient:On(function (id: number, infoType: Enum.InfoType, ok: boolean, result: any)
+        local key = `{infoType.Name}_{id}`
+
+        local pending = pendingProductInfoRequests[key]
+        pendingProductInfoRequests[key] = nil
+
+        if pending then
+            if ok then
+                pending.Resolve(result)
+            else
+                pending.Reject(result)
+            end
+        end
+    end)
+
+    ownershipClient:On(function (userId: number, id: any, infoType: Enum.InfoType, ok: boolean, owned: any)
+        local key = `{userId}_{infoType.Name}_{id}`
+
+        local pending = pendingOwnershipRequests[key]
+        pendingOwnershipRequests[key] = nil
+
+        if pending then
+            if ok then
+                pending.Resolve(owned == true)
+            else
+                pending.Reject(owned)
+            end
+
+            return
+        end
+
+        -- Result pushed from a server-side query the client never asked for; warm the local cache.
+        if ok then
+            local player = Players:GetPlayerByUserId(userId)
+
+            if player then
+                local data = getOwnershipRecord(player, id, infoType)
+
+                if not data.Promise then
+                    data.Promise = Promise.resolve(owned == true)
+                end
+            end
+        end
+    end)
+
+    grantPurchaseClient:On(grantPurchase)
+end
+
+local function remover<Key, Func>(setter: (key: Key, callback: Func?) -> ())
+    return function (key: Key)
+        setter(key, nil :: Func?)
+    end
 end
 
 return table.freeze({
@@ -635,15 +813,21 @@ return table.freeze({
     BulkResolveOwnership = bulkResolveOwnership,
     GetOwnershipChangedSignal = getOwnershipChangedSignal,
 
-    AddPurchaseValidator = addPurchaseValidator,
-    RemovePurchaseValidator = removePurchaseValidator,
+    SetReceiptHandler = setReceiptHandler,
+    SetMockEconomyCheck = setMockEconomyCheck,
+    SetPurchaseValidator = setPurchaseValidator,
+    SetProductOwnershipChecker = setProductOwnershipChecker,
 
-    AddMockEconomyCheck = addMockEconomyCheck,
-    RemoveMockEconomyCheck = removeMockEconomyCheck,
+    AddReceiptHandler = setReceiptHandler,
+    AddMockEconomyCheck = setMockEconomyCheck,
+    AddPurchaseValidator = setPurchaseValidator,
+    AddProductOwnershipChecker = setProductOwnershipChecker,
 
-    AddReceiptHandler = addReceiptHandler,
-    RemoveReceiptHandler = removeReceiptHandler,
-    
+    RemoveReceiptHandler = remover(setReceiptHandler),
+    RemoveMockEconomyCheck = remover(setMockEconomyCheck),
+    RemovePurchaseValidator = remover(setPurchaseValidator),
+    RemoveProductOwnershipChecker = remover(setProductOwnershipChecker),
+
     PromptPurchaseFinished = promptPurchaseFinished,
     ProductGranted = productGranted,
 })
