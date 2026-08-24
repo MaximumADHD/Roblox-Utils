@@ -62,16 +62,12 @@ type PendingRequest = {
 export type ReceiptInfo = {
     PurchaseId: string,
     PlayerId: number,
+    ProductId: number,
     PlaceIdWherePurchased: number,
     ReceiptType: Enum.ReceiptType,
     CurrencySpent: number,
-
-    -- Only present for Enum.ReceiptType.DeveloperProduct receipts.
-    CurrencyType: Enum.CurrencyType?,
-    ProductId: number?,
-
-    -- Only present for Robux transfer receipts.
-    TransferRequestId: string?,
+    CurrencyType: Enum.CurrencyType,
+    ProductPurchaseChannel: Enum.ProductPurchaseChannel,
 }
 
 local ownership = {} :: {
@@ -125,11 +121,10 @@ local productOwnershipCheckers = {} :: {
     [number]: (player: Player, productId: number) -> boolean,
 }
 
-
 local receiptHandlers = {} :: {
     [number]: {
-        Callback: (info: ReceiptInfo) -> Enum.ReceiptDecision,
-        Connection: RBXScriptConnection,
+        Callback: (info: ReceiptInfo) -> Enum.ProductPurchaseDecision,
+        Connection: RBXScriptConnection?,
     }
 }
 
@@ -148,7 +143,7 @@ local function setMockEconomyCheck(id: string, check: (() -> boolean)?)
 end
 
 local function setPurchaseValidator(id: string, validator: ((player: Player, id: any, infoType: Enum.InfoType) -> boolean)?)
-    assert(RunContext.IsServer, "Purchase validators can only be added from the server!")
+    assert(RunContext.IsServer or RunContext.IsEdit, "Purchase validators can only be added from the server!")
 
     if validator then
         purchaseValidators[id] = validator
@@ -158,8 +153,6 @@ local function setPurchaseValidator(id: string, validator: ((player: Player, id:
 end
 
 local function setProductOwnershipChecker(productId: number, checker: ((player: Player, productId: number) -> boolean)?)
-    assert(RunContext.IsServer, "Product ownership checker can only be set from the server!")
-    
     if checker then
         productOwnershipCheckers[productId] = checker
     else
@@ -195,6 +188,7 @@ local playerOwnsItem = Promise.promisify(function(player: Player, itemId: any, i
         -- Lazy "ownership" check for developer products. They aren't owned, but in events where the developer wants to
         -- for example, check if a player has purchased a gifting product, they can register a custom checker for that id.
         local checker = productOwnershipCheckers[itemId]
+        warn("CHECKER", checker, itemId, player)
 
         if checker then
             return checker(player, itemId)
@@ -353,7 +347,19 @@ local function promiseOwnership(player: Player, id: number, infoType: Enum.InfoT
 
     if not data.Promise then
         if canMockEconomy() then
-            data.Promise = Promise.resolve(false)
+            local owned = false
+
+            if infoType == Enum.InfoType.Product then
+                -- Lazy "ownership" check for developer products. They aren't owned, but in events where the developer wants to
+                -- for example, check if a player has purchased a gifting product, they can register a custom checker for that id.
+                local checker = productOwnershipCheckers[id]
+
+                if checker then
+                    owned = checker(player, id)
+                end
+            end
+            
+            data.Promise = Promise.resolve(owned)
             return assert(data.Promise)
         end
 
@@ -486,11 +492,11 @@ local function prefetchProductInfo(id: number, infoType: Enum.InfoType?): Promis
     return promiseProductInfo(id, infoType, false)
 end
 
-local function setReceiptHandler(productId: number, handler: ((info: ReceiptInfo) -> Enum.ReceiptDecision)?)
-    assert(RunContext.IsServer, "Receipt handlers can only be set from the server!")
+local function setReceiptHandler(productId: number, handler: ((info: ReceiptInfo) -> Enum.ProductPurchaseDecision)?)
+    assert(RunContext.IsServer or RunContext.IsEdit, "Receipt handlers can only be set from the server!")
     local activeHandler = receiptHandlers[productId]
 
-    if activeHandler then
+    if activeHandler and activeHandler.Connection then
         activeHandler.Connection:Disconnect()
     end
 
@@ -501,10 +507,10 @@ local function setReceiptHandler(productId: number, handler: ((info: ReceiptInfo
 
     -- Wrap the handler so successful receipts notify the rest of the module
     -- (ProductGranted, PromptPurchaseFinished, client replication).
-    local function onHandleReceipt(info: ReceiptInfo): Enum.ReceiptDecision
+    local function onHandleReceipt(info: ReceiptInfo): Enum.ProductPurchaseDecision
         local decision = handler(info)
 
-        if decision == Enum.ReceiptDecision.Processed then
+        if decision == Enum.ProductPurchaseDecision.PurchaseGranted then
             local player = Players:GetPlayerByUserId(info.PlayerId)
 
             if player then
@@ -518,20 +524,34 @@ local function setReceiptHandler(productId: number, handler: ((info: ReceiptInfo
     receiptHandlers[productId] = {
         Callback = onHandleReceipt,
 
-        Connection = MarketplaceService:BindReceiptHandler(
-            Enum.ReceiptType.DeveloperProduct,
-            onHandleReceipt,
-            { productId }
-        )
+        -- !!FIXME - Can't use this yet because Roblox hasn't enabled support for ReceiptType.DeveloperProduct
+        -- The developer has to manually call ProcessReceiptAsync in their own ProcessReceipt handler for now :(
+
+        -- Connection = MarketplaceService:BindReceiptHandler(
+        --     Enum.ReceiptType.DeveloperProduct,
+        --     onHandleReceipt,
+        --     { productId }
+        -- )
     }
 end
 
--- Simulates a developer product receipt when the economy is mocked (or in edit mode),
--- routing it through the registered receipt handler like a real purchase would be.
-local function processMockReceiptAsync(player: Player, productId: number)
+--- Processes a developer product receipt if there is a receipt handler registered for its product id.
+--- Returns the handler's decision, or nil if there is no handler for the product associated with the receipt.
+local function processReceiptAsync(receipt: ReceiptInfo): Enum.ProductPurchaseDecision?
+    local productId = receipt.ProductId
     local activeHandler = receiptHandlers[productId]
 
-    local info: ReceiptInfo = {
+    if activeHandler then
+        return activeHandler.Callback(receipt)
+    end
+
+    return nil
+end
+
+--- Simulates a developer product receipt when the economy is mocked (or in edit mode),
+--- routing it through the registered receipt handler like a real purchase would be.
+local function mockReceiptAsync(player: Player, productId: number)
+    return processReceiptAsync({
         PurchaseId = `MOCK_` .. HttpService:GenerateGUID(false),
         PlayerId = player.UserId,
         PlaceIdWherePurchased = game.PlaceId,
@@ -539,22 +559,8 @@ local function processMockReceiptAsync(player: Player, productId: number)
         CurrencySpent = 0,
         ProductId = productId,
         CurrencyType = Enum.CurrencyType.Robux,
-    }
-
-    if activeHandler then
-        -- Wrapped callback has productGranted and grantPurchase calls, so we just need to check the decision.
-        local ok, decision = xpcall(activeHandler.Callback, function (err)
-            warn("ERROR PROCESSING MOCK RECEIPT FOR PRODUCT:", productId, "-", err, debug.traceback())
-        end, info)
-
-        if ok and decision ~= Enum.ReceiptDecision.Processed then
-            warn("MOCK RECEIPT NOT YET PROCESSED FOR PRODUCT:", productId)
-        end
-    else
-        -- No receipt handler registered; grant directly.
-        productGranted:Fire(player, productId, info)
-        grantPurchase(player, productId, Enum.InfoType.Product)
-    end
+        ProductPurchaseChannel = Enum.ProductPurchaseChannel.InExperience,
+    })
 end
 
 local function bulkResolveOwnership(player: Player, ownershipList: { VapidOwnership }): Promise
@@ -601,11 +607,7 @@ function grantPurchase(player: Player, id: any, infoType: Enum.InfoType)
         server:FireAll(player, id, infoType)
     end
 
-    -- Developer products are consumable and never owned, so don't cache ownership.
-    data.Promise = if infoType ~= Enum.InfoType.Product 
-        then Promise.resolve(true)
-        else nil
-
+    data.Promise = Promise.resolve(true)
     promptPurchaseFinished:Fire(player, id, infoType)
 end
 
@@ -634,7 +636,17 @@ local function promptPurchase(id: any, infoType: Enum.InfoType?, player: Player?
         end
 
         if infoType == Enum.InfoType.Product then
-            task.spawn(processMockReceiptAsync, player, id)
+            task.spawn(function ()
+                if not player then
+                    return
+                end
+                
+                local result = mockReceiptAsync(player, id)
+
+                if result == Enum.ProductPurchaseDecision.PurchaseGranted then
+                    grantPurchase(player, id, Enum.InfoType.Product)
+                end
+            end)
         else
             grantPurchase(player, id, infoType or Enum.InfoType.Asset)
         end
@@ -650,16 +662,6 @@ local function promptPurchase(id: any, infoType: Enum.InfoType?, player: Player?
         MarketplaceService:PromptProductPurchase(player, id)
     else
         MarketplaceService:PromptPurchase(player, id)
-    end
-end
-
-if RunContext.IsEdit then
-    local mockEconomy = workspace:GetAttribute("EditModeMockEconomy")
-
-    if mockEconomy then
-        setMockEconomyCheck("__EditMode", function ()
-            return true
-        end)
     end
 end
 
@@ -725,7 +727,7 @@ if RunContext.IsServer or RunContext.IsEdit then
     MarketplaceService.PromptBundlePurchaseFinished:Connect(createPurchaseFinishedCallback(Enum.InfoType.Bundle))
     MarketplaceService.PromptGamePassPurchaseFinished:Connect(createPurchaseFinishedCallback(Enum.InfoType.GamePass))
     MarketplaceService.PromptSubscriptionPurchaseFinished:Connect(createPurchaseFinishedCallback(Enum.InfoType.Subscription))
-
+    
     local function onPlayerRemoving(player: Player)
         local ownershipTable = ownership[player]
 
@@ -809,6 +811,7 @@ return table.freeze({
     GetProductInfo = promiseProductInfo,
     PrefetchProductInfo = prefetchProductInfo,
 
+    GrantPurchase = grantPurchase,
     PromptPurchase = promptPurchase,
     BulkResolveOwnership = bulkResolveOwnership,
     GetOwnershipChangedSignal = getOwnershipChangedSignal,
@@ -828,6 +831,8 @@ return table.freeze({
     RemovePurchaseValidator = remover(setPurchaseValidator),
     RemoveProductOwnershipChecker = remover(setProductOwnershipChecker),
 
-    PromptPurchaseFinished = promptPurchaseFinished,
     ProductGranted = productGranted,
+    MockReceiptAsync = mockReceiptAsync,
+    ProcessReceiptAsync = processReceiptAsync,
+    PromptPurchaseFinished = promptPurchaseFinished,
 })

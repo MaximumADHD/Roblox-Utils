@@ -1,12 +1,12 @@
 [package]
 name = "maximumadhd/network"
-description = "Network - A super thin network library based on Red by jackdotink, with support for edit mode."
-version = "1.1.1"
+description = "Network - A thin network library based on Red by jackdotink, designed for writing networked modules that are required on the server/client simultaneously."
+version = "1.2.2"
 license = "MIT"
 authors = ["MaximumADHD"]
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 
 [dependencies]
-Signal = "sleitnick/signal@^2"
-RunContext = "maximumadhd/run-context@^1"
+Signal = "stravant/goodsignal@0.3.1"
+RunContext = "maximumadhd/run-context@1.0.1"

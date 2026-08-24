@@ -1,4 +1,3 @@
---!strict
 local EasyStore = {}
 EasyStore.__index = EasyStore
 
@@ -281,9 +280,13 @@ function EasyStore.Get<T>(self: Class<T>, target: (Player | number)?): PlayerDat
                     cache[userId] = nil
                 end
                 
-                data.IsLoaded = false
-                data.Loaded:DisconnectAll()
-                data.Updated:DisconnectAll()
+                data:Save(true):catch(function (err)
+                    warn("Failed to save profile for player", userId, err)
+                end):finally(function ()
+                    data.IsLoaded = false
+                    data.Loaded:DisconnectAll()
+                    data.Updated:DisconnectAll()
+                end)
             end)
 
             cache[userId] = data
@@ -602,8 +605,9 @@ function EasyStore.Start<T>(self: Class<T>): Trove
             local data: PlayerData<T> = self._dataCache[userId]
 
             if data then
-                data:Save()
-                free(data :: any)
+                data:Save(true):andThen(function ()
+                    free(data)
+                end)
             end
         end
 
