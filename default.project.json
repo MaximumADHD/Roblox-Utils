@@ -26,6 +26,10 @@
                 "React": {
                     "$path": "Packages/React.lua"
                 },
+                
+                "ReactGlobals": {
+                    "$path": "Packages/ReactGlobals.lua"
+                },
 
                 "ReactRoblox": {
                     "$path": "Packages/ReactRoblox.lua"

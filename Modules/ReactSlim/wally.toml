@@ -1,0 +1,13 @@
+[package]
+name = "maximumadhd/react-slim"
+description = "React merged with ReactRoblox & ReactGlobals, with relaxed types for Luau's new type solver."
+version = "17.3.1101"
+license = "MIT"
+authors = ["MaximumADHD"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[dependencies]
+React = "roblox/react@17.3.11"
+ReactRoblox = "roblox/react-roblox@17.3.11"
+ReactGlobals = "roblox/react-globals@17.3.11"
