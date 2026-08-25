@@ -3,7 +3,7 @@
 local Client = {}
 Client.__index = Client
 
-local Network = script.Parent
+local Network = script.Parent.Parent
 local Types = require(Network.Types)
 local Signal = Types.Signal
 

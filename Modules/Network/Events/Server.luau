@@ -3,7 +3,7 @@
 local Server = {}
 Server.__index = Server
 
-local Network = script.Parent
+local Network = script.Parent.Parent
 local Players = game:GetService("Players")
 
 local Types = require(Network.Types)

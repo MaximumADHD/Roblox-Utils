@@ -81,9 +81,9 @@ ReactSlim.memo = React.memo ::
 
 ReactSlim.Tag = React.Tag
 ReactSlim.None = React.None
-ReactSlim.Fragment = React.Fragment :: Element
-ReactSlim.Profiler = React.Profiler :: Element
-ReactSlim.StrictMode = React.StrictMode :: Element
+ReactSlim.Fragment = React.Fragment
+ReactSlim.Profiler = React.Profiler
+ReactSlim.StrictMode = React.StrictMode
 
 ReactSlim.Children = React.Children :: {
     map: <Props, K1, K2>(
