@@ -8,9 +8,10 @@ registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 
 [dependencies]
-React = "jsdotlua/react@17.2.1"
+React = "roblox/react@17.3.11"
 Trove = "sleitnick/trove@1.5.1"
 Signal = "sleitnick/signal@2.0.3"
 Squash = "data-oriented-house/squash@4.1.0"
-ReactRoblox = "jsdotlua/react-roblox@17.2.1"
+ReactRoblox = "roblox/react-roblox@17.3.11"
+ReactGlobals = "roblox/react-globals@17.3.11"
 PromiseBase = "evaera/promise@4.0.0"
